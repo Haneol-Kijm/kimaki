@@ -15,6 +15,8 @@ It is maintained on a best-effort basis, with no promise of stability, API compa
 
 Original upstream copyright and license notices are preserved. Unless otherwise noted, this repository is distributed under the same MIT license terms; see `LICENSE`.
 
+---
+
 Kimaki is a Discord bot that lets you control [OpenCode](https://opencode.ai) coding sessions from Discord. Send a message in a Discord channel → an AI agent edits code on your machine.
 
 ## Quick Start
