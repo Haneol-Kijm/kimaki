@@ -53,7 +53,7 @@ export async function handleCodexRetryButton(
   }
 
   const retried = await runtime.retryLastUserPrompt({
-    sandboxMode: action as CodexSandboxMode,
+    sandboxMode: action,
   })
   if (!retried) {
     await interaction.reply({
@@ -64,7 +64,10 @@ export async function handleCodexRetryButton(
   }
 
   await interaction.update({
-    content: `Retrying the last Codex prompt with \`${action}\`.`,
+    content:
+      action === 'danger-full-access'
+        ? 'Retrying the last Codex prompt with full access.'
+        : `Retrying the last Codex prompt with \`${action}\`.`,
     components: [],
   })
 }

@@ -21,9 +21,11 @@ import {
 import { resolveTextChannel, getKimakiMetadata } from '../discord-utils.js'
 import { getRuntime } from '../session-handler/thread-session-runtime.js'
 import {
-  CODEX_MODEL_OPTIONS,
+  type CodexReasoningEffort,
   describeCodexModelSource,
   findCodexModelOption,
+  getCodexModelOptions,
+  getCodexReasoningOptions,
   getCurrentCodexModelInfo,
 } from '../codex/codex-models.js'
 import { createLogger, LogPrefix } from '../logger.js'
@@ -37,6 +39,7 @@ type PendingCodexModelContext = {
   isThread: boolean
   threadId?: string
   selectedModelId?: string
+  selectedReasoningEffort?: CodexReasoningEffort
 }
 
 const pendingCodexModelContexts = new Map<string, PendingCodexModelContext>()
@@ -100,9 +103,13 @@ export async function handleCodexModelCommand({
     channelId: targetChannelId,
   })
 
-  const currentOption = findCodexModelOption(currentModelInfo.modelId)
+  const currentOption = await findCodexModelOption(currentModelInfo.modelId)
   const currentModelLabel = currentOption?.label || currentModelInfo.modelId
   const currentSource = describeCodexModelSource(currentModelInfo.source)
+  const currentEffort = currentModelInfo.reasoningEffort
+    ? ` / ${currentModelInfo.reasoningEffort}`
+    : ''
+  const modelOptions = await getCodexModelOptions()
 
   const contextHash = crypto.randomBytes(8).toString('hex')
   setContext(contextHash, {
@@ -115,7 +122,7 @@ export async function handleCodexModelCommand({
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`codex_model_select:${contextHash}`)
     .setPlaceholder('Select a Codex model')
-    .addOptions(CODEX_MODEL_OPTIONS.map((option) => ({
+    .addOptions(modelOptions.map((option) => ({
       label: option.label.slice(0, 100),
       value: option.id,
       description: option.description.slice(0, 100),
@@ -123,7 +130,7 @@ export async function handleCodexModelCommand({
     })))
 
   await interaction.editReply({
-    content: `**Codex model**\nCurrent: \`${currentModelLabel}\` (${currentSource})\nSelect a model:`,
+    content: `**Codex model**\nCurrent: \`${currentModelLabel}\`${currentEffort} (${currentSource})\nSelect a model:`,
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
     ],
@@ -161,6 +168,65 @@ export async function handleCodexModelSelectMenu(
   context.selectedModelId = selectedModelId
   setContext(contextHash, context)
 
+  const reasoningOptions = getCodexReasoningOptions({
+    modelId: selectedModelId,
+  })
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`codex_model_effort:${contextHash}`)
+    .setPlaceholder('Select reasoning effort')
+    .addOptions(reasoningOptions.map((option) => ({
+      label: option.label,
+      value: option.id,
+      description: option.description.slice(0, 100),
+      default: option.id === 'high',
+    })))
+
+  await interaction.editReply({
+    content: `Selected \`${selectedModelId}\`.\nSelect the reasoning effort:`,
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+    ],
+  })
+}
+
+export async function handleCodexModelEffortSelectMenu(
+  interaction: StringSelectMenuInteraction,
+): Promise<void> {
+  if (!interaction.customId.startsWith('codex_model_effort:')) {
+    return
+  }
+
+  await interaction.deferUpdate()
+
+  const contextHash = interaction.customId.replace('codex_model_effort:', '')
+  const context = pendingCodexModelContexts.get(contextHash)
+  if (!context?.selectedModelId) {
+    await interaction.editReply({
+      content: 'Selection expired. Please run /model again.',
+      components: [],
+    })
+    return
+  }
+
+  const selectedEffort = interaction.values[0]
+  if (
+    selectedEffort !== 'minimal' &&
+    selectedEffort !== 'low' &&
+    selectedEffort !== 'medium' &&
+    selectedEffort !== 'high' &&
+    selectedEffort !== 'xhigh'
+  ) {
+    await interaction.editReply({
+      content: 'Invalid reasoning effort selected.',
+      components: [],
+    })
+    return
+  }
+
+  context.selectedReasoningEffort = selectedEffort
+  setContext(contextHash, context)
+
   const scopeOptions = [
     ...(context.isThread && context.sessionId
       ? [{
@@ -182,7 +248,7 @@ export async function handleCodexModelSelectMenu(
     .addOptions(scopeOptions)
 
   await interaction.editReply({
-    content: `Selected \`${selectedModelId}\`.\nApply it to:`,
+    content: `Selected \`${context.selectedModelId}\` / \`${selectedEffort}\`.\nApply it to:`,
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
     ],
@@ -229,7 +295,7 @@ export async function handleCodexModelScopeSelectMenu(
     await setSessionModel({
       sessionId: context.sessionId,
       modelId: context.selectedModelId,
-      variant: null,
+      variant: context.selectedReasoningEffort ?? null,
     })
 
     const runtime = context.threadId ? getRuntime(context.threadId) : undefined
@@ -237,20 +303,26 @@ export async function handleCodexModelScopeSelectMenu(
     const retryNote = retried
       ? '\nRestarting the last request with the new model.'
       : '\nThe next message in this thread will use the new model.'
+    const effortText = context.selectedReasoningEffort
+      ? ` / ${context.selectedReasoningEffort}`
+      : ''
 
     await interaction.editReply({
-      content: `Codex model set for this thread:\n\`${context.selectedModelId}\`${retryNote}`,
+      content: `Codex model set for this thread:\n\`${context.selectedModelId}\`${effortText}${retryNote}`,
       components: [],
     })
   } else {
     await setChannelModel({
       channelId: context.channelId,
       modelId: context.selectedModelId,
-      variant: null,
+      variant: context.selectedReasoningEffort ?? null,
     })
 
+    const effortText = context.selectedReasoningEffort
+      ? ` / ${context.selectedReasoningEffort}`
+      : ''
     await interaction.editReply({
-      content: `Codex model set for this channel:\n\`${context.selectedModelId}\`\nNew threads in this channel will use it.`,
+      content: `Codex model set for this channel:\n\`${context.selectedModelId}\`${effortText}\nNew threads in this channel will use it.`,
       components: [],
     })
   }

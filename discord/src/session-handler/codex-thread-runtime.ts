@@ -22,9 +22,11 @@ import {
 import { createLogger, LogPrefix } from '../logger.js'
 import {
   CODEX_DEFAULT_MODEL_ID,
+  type CodexReasoningEffort,
   getCurrentCodexModelInfo,
   toCodexCliModel,
 } from '../codex/codex-models.js'
+import { store } from '../store.js'
 import {
   showCodexRetryButtons,
   type CodexSandboxMode,
@@ -41,11 +43,17 @@ type CodexJsonEvent = {
   thread_id?: string
   message?: string
   item?: {
+    id?: string
     type?: string
     text?: string
     command?: string
     aggregated_output?: string
-    exit_code?: number
+    exit_code?: number | null
+    status?: string
+    changes?: Array<{
+      path?: string
+      kind?: string
+    }>
   }
   error?: {
     message?: string
@@ -62,7 +70,6 @@ type CodexTurnResult = {
   runId: number
   sessionId?: string
   assistantTexts: string[]
-  commands: CompletedCommand[]
   errorMessage?: string
   sandboxDeniedContext?: string
   wasAborted: boolean
@@ -79,6 +86,24 @@ function truncate(text: string, maxChars: number): string {
     return text
   }
   return `${text.slice(0, maxChars - 1)}…`
+}
+
+function escapeInlineMarkdown(text: string): string {
+  return text.replace(/([*_~|`\\])/g, '\\$1')
+}
+
+function stripMarkdownLinks(text: string): string {
+  return text.replace(/!?\[([^\]]*)\]\(([^)\n]+)\)/g, (_match, rawLabel, rawTarget) => {
+    const label = String(rawLabel).trim()
+    const target = String(rawTarget).trim().replace(/^<|>$/g, '')
+    if (!label) {
+      return target
+    }
+    if (label === target) {
+      return target
+    }
+    return `${label}: ${target}`
+  })
 }
 
 function parseDataUrl(url: string): { mime: string; base64: string } | Error {
@@ -165,7 +190,7 @@ export class CodexThreadRuntime implements SessionRuntime {
   private typingKeepaliveTimeout: ReturnType<typeof setTimeout> | null = null
   private preprocessChain: Promise<void> = Promise.resolve()
   private blockedAfterAbort = false
-  private currentSandboxMode: CodexSandboxMode = 'workspace-write'
+  private currentSandboxMode: CodexSandboxMode = 'danger-full-access'
   private lastTurnInput: QueuedMessage | undefined
 
   constructor(opts: RuntimeOptions) {
@@ -223,9 +248,9 @@ export class CodexThreadRuntime implements SessionRuntime {
     this.clearTypingKeepalive()
   }
 
-  private shouldTreatAsQueued(): boolean {
+  private hasPendingOrActiveWork(): boolean {
     const queueLength = this.state?.queueItems.length ?? 0
-    return Boolean(this.activeChild) || queueLength > 0 || this.blockedAfterAbort
+    return Boolean(this.activeChild) || Boolean(this.activeTurnPromise) || queueLength > 0
   }
 
   private async resolvePreprocessedInput(
@@ -265,7 +290,7 @@ export class CodexThreadRuntime implements SessionRuntime {
       return { queued: false }
     }
 
-    const wasQueued = this.shouldTreatAsQueued()
+    const hadPendingWork = this.hasPendingOrActiveWork()
     if (this.blockedAfterAbort) {
       this.blockedAfterAbort = false
     }
@@ -273,7 +298,7 @@ export class CodexThreadRuntime implements SessionRuntime {
     threadState.enqueueItem(this.threadId, queuedInput)
     const position = this.state?.queueItems.length
 
-    if (!wasQueued) {
+    if (!hadPendingWork) {
       this.startDrainLoop()
       return { queued: false }
     }
@@ -355,6 +380,13 @@ export class CodexThreadRuntime implements SessionRuntime {
       }
     })().finally(() => {
       this.activeTurnPromise = null
+      if (
+        !this.disposed &&
+        !this.blockedAfterAbort &&
+        (this.state?.queueItems.length ?? 0) > 0
+      ) {
+        this.startDrainLoop()
+      }
     })
   }
 
@@ -376,11 +408,13 @@ export class CodexThreadRuntime implements SessionRuntime {
       threadState.setSessionId(this.threadId, persistedSessionId)
     }
 
-    const currentModel = input.model || (await getCurrentCodexModelInfo({
+    const currentModelInfo = await getCurrentCodexModelInfo({
       sessionId: persistedSessionId,
       channelId: this.channelId,
-    })).modelId
+    })
+    const currentModel = input.model || currentModelInfo.modelId
     const cliModel = toCodexCliModel(currentModel)
+    const reasoningEffort = currentModelInfo.reasoningEffort
 
     const sandboxMode = input.sandboxMode || this.currentSandboxMode
     this.currentSandboxMode = sandboxMode
@@ -390,10 +424,12 @@ export class CodexThreadRuntime implements SessionRuntime {
         prompt: `Run the queued slash command /${input.command.name}${input.command.arguments ? ` ${input.command.arguments}` : ''}. Follow the request and report the result clearly.`,
         username: input.username,
         isSlashCommand: true,
+        includeCritiqueInstructions: store.getState().critiqueEnabled,
       })
       : buildCodexPrompt({
         prompt: input.prompt,
         username: input.username,
+        includeCritiqueInstructions: store.getState().critiqueEnabled,
       })
 
     this.ensureTypingKeepalive()
@@ -401,6 +437,7 @@ export class CodexThreadRuntime implements SessionRuntime {
       promptText,
       sessionId: persistedSessionId,
       model: cliModel,
+      reasoningEffort,
       sandboxMode,
       images: input.images || [],
     })
@@ -426,16 +463,12 @@ export class CodexThreadRuntime implements SessionRuntime {
       return
     }
 
-    for (const command of turnResult.commands) {
-      await sendThreadMessage(this.thread, formatCommandExecution(command))
-    }
-
-    for (const assistantText of turnResult.assistantTexts) {
-      await sendThreadMessage(this.thread, assistantText)
-    }
-
     if (turnResult.errorMessage) {
       await sendThreadMessage(this.thread, `✗ ${turnResult.errorMessage}`)
+      return
+    }
+
+    if (turnResult.assistantTexts.length === 0) {
       return
     }
 
@@ -452,7 +485,10 @@ export class CodexThreadRuntime implements SessionRuntime {
       { flags: NOTIFY_MESSAGE_FLAGS },
     )
 
-    if (turnResult.sandboxDeniedContext) {
+    if (
+      turnResult.sandboxDeniedContext &&
+      this.currentSandboxMode !== 'danger-full-access'
+    ) {
       await showCodexRetryButtons({
         thread: this.thread,
         context: truncate(turnResult.sandboxDeniedContext, 300),
@@ -464,12 +500,14 @@ export class CodexThreadRuntime implements SessionRuntime {
     promptText,
     sessionId,
     model,
+    reasoningEffort,
     sandboxMode,
     images,
   }: {
     promptText: string
     sessionId?: string
     model?: string
+    reasoningEffort?: CodexReasoningEffort
     sandboxMode: CodexSandboxMode
     images: DiscordFileAttachment[]
   }): Promise<CodexTurnResult> {
@@ -486,12 +524,14 @@ export class CodexThreadRuntime implements SessionRuntime {
         sessionId,
         promptText,
         model,
+        reasoningEffort,
         sandboxMode,
         imagePaths: tempImagePaths,
       })
       : buildExecArgs({
         promptText,
         model,
+        reasoningEffort,
         sandboxMode,
         imagePaths: tempImagePaths,
         cwd: this.sdkDirectory,
@@ -507,10 +547,32 @@ export class CodexThreadRuntime implements SessionRuntime {
     this.activeChild = child
 
     const assistantTexts: string[] = []
-    const commands: CompletedCommand[] = []
     let nextSessionId = sessionId
     let errorMessage: string | undefined
     let sandboxDeniedContext: string | undefined
+    const startedCommandIds = new Set<string>()
+    let renderChain = Promise.resolve()
+
+    const queueRenderMessage = (content: string | undefined): void => {
+      if (!content?.trim()) {
+        return
+      }
+      renderChain = renderChain.then(async () => {
+        if (this.disposed || this.abortedRunId === runId) {
+          return
+        }
+        const sendResult = await errore.tryAsync(() => {
+          return sendThreadMessage(this.thread, content)
+        })
+        if (sendResult instanceof Error) {
+          logger.warn(
+            `[CODEX] failed to render progress for ${this.threadId}: ${sendResult.message}`,
+          )
+          return
+        }
+        this.ensureTypingKeepalive()
+      })
+    }
 
     const parseLine = (line: string): void => {
       const trimmed = line.trim()
@@ -529,10 +591,23 @@ export class CodexThreadRuntime implements SessionRuntime {
         return
       }
 
+      if (
+        parsed.type === 'item.started' &&
+        parsed.item?.type === 'command_execution'
+      ) {
+        const itemId = parsed.item.id
+        if (itemId) {
+          startedCommandIds.add(itemId)
+        }
+        queueRenderMessage(formatCommandStarted(parsed.item.command || ''))
+        return
+      }
+
       if (parsed.type === 'item.completed' && parsed.item?.type === 'agent_message') {
         const text = parsed.item.text?.trim()
         if (text) {
           assistantTexts.push(text)
+          queueRenderMessage(formatCodexAssistantText(text))
           if (!sandboxDeniedContext && SANDBOX_DENIAL_RE.test(text)) {
             sandboxDeniedContext = text
           }
@@ -544,10 +619,18 @@ export class CodexThreadRuntime implements SessionRuntime {
         parsed.type === 'item.completed' &&
         parsed.item?.type === 'command_execution'
       ) {
+        const itemId = parsed.item.id
+        if (itemId && !startedCommandIds.has(itemId)) {
+          queueRenderMessage(formatCommandStarted(parsed.item.command || ''))
+        }
         const command = parsed.item.command || ''
         const output = parsed.item.aggregated_output || ''
         const exitCode = parsed.item.exit_code ?? 0
-        commands.push({ command, output, exitCode })
+        queueRenderMessage(formatCommandExecution({
+          command,
+          output,
+          exitCode,
+        }))
         if (
           !sandboxDeniedContext &&
           exitCode !== 0 &&
@@ -555,6 +638,11 @@ export class CodexThreadRuntime implements SessionRuntime {
         ) {
           sandboxDeniedContext = output
         }
+        return
+      }
+
+      if (parsed.type === 'item.completed' && parsed.item?.type === 'file_change') {
+        queueRenderMessage(formatFileChanges(parsed.item.changes || []))
         return
       }
 
@@ -608,6 +696,8 @@ export class CodexThreadRuntime implements SessionRuntime {
       await cleanupTempPaths(tempImagePaths)
     })
 
+    await renderChain
+
     const wasAborted = this.abortedRunId === runId
 
     if (!wasAborted && exitCode && exitCode !== 0 && !errorMessage) {
@@ -618,7 +708,6 @@ export class CodexThreadRuntime implements SessionRuntime {
       runId,
       sessionId: nextSessionId,
       assistantTexts,
-      commands,
       errorMessage,
       sandboxDeniedContext,
       wasAborted,
@@ -681,15 +770,17 @@ export class CodexThreadRuntime implements SessionRuntime {
   }
 }
 
-function buildExecArgs({
+export function buildExecArgs({
   promptText,
   model,
+  reasoningEffort,
   sandboxMode,
   imagePaths,
   cwd,
 }: {
   promptText: string
   model?: string
+  reasoningEffort?: CodexReasoningEffort
   sandboxMode: CodexSandboxMode
   imagePaths: string[]
   cwd: string
@@ -704,6 +795,11 @@ function buildExecArgs({
 
   if (model) {
     args.push('--model', model)
+  }
+  if (reasoningEffort) {
+    args.push('-c', `model_reasoning_effort="${reasoningEffort}"`)
+  } else if (model) {
+    args.push('-c', 'model_reasoning_effort="high"')
   }
 
   if (sandboxMode === 'danger-full-access') {
@@ -720,16 +816,18 @@ function buildExecArgs({
   return args
 }
 
-function buildResumeArgs({
+export function buildResumeArgs({
   sessionId,
   promptText,
   model,
+  reasoningEffort,
   sandboxMode,
   imagePaths,
 }: {
   sessionId: string
   promptText: string
   model?: string
+  reasoningEffort?: CodexReasoningEffort
   sandboxMode: CodexSandboxMode
   imagePaths: string[]
 }): string[] {
@@ -743,9 +841,16 @@ function buildResumeArgs({
   if (model) {
     args.push('--model', model)
   }
+  if (reasoningEffort) {
+    args.push('-c', `model_reasoning_effort="${reasoningEffort}"`)
+  } else if (model) {
+    args.push('-c', 'model_reasoning_effort="high"')
+  }
 
   if (sandboxMode === 'danger-full-access') {
     args.push('--dangerously-bypass-approvals-and-sandbox')
+  } else {
+    args.push('--sandbox', sandboxMode)
   }
 
   for (const imagePath of imagePaths) {
@@ -756,16 +861,177 @@ function buildResumeArgs({
   return args
 }
 
-function formatCommandExecution(command: CompletedCommand): string {
-  const output = truncate(command.output.trim(), 1200)
-  if (!output) {
-    return `Ran \`${command.command}\` (exit ${command.exitCode}).`
+function normalizeCommand(command: string): string {
+  return command.trim().replace(/\s+/g, ' ')
+}
+
+function unwrapShellCommand(command: string): string {
+  let unwrapped = normalizeCommand(command)
+  unwrapped = unwrapped.replace(/^\/bin\/(?:ba)?sh\s+-lc\s+/, '')
+  if (
+    (unwrapped.startsWith("'") && unwrapped.endsWith("'")) ||
+    (unwrapped.startsWith('"') && unwrapped.endsWith('"'))
+  ) {
+    unwrapped = unwrapped.slice(1, -1)
+  }
+  return unwrapped.trim()
+}
+
+const SAFE_READ_ONLY_SEGMENTS = [
+  /^(pwd|whoami|uname|id)(\s|$)/,
+  /^ls(\s|$)/,
+  /^find(\s|$)/,
+  /^(cat|head|tail|wc|du|stat|file|realpath|tree|sort|cut|awk|grep|rg)(\s|$)/,
+  /^sed(\s+-n)?(\s|$)/,
+  /^git (status|diff|show|log|rev-parse|symbolic-ref|branch|worktree list)(\s|$)/,
+]
+
+const WRITE_COMMAND_RE =
+  /\b(rm|mv|cp|chmod|chown|touch|mkdir|rmdir|tee|dd|ln|truncate|git add|git commit|git reset|git checkout|git switch|git restore|pnpm|npm|bun|node|python|uv|cargo|go|make|cmake|docker|podman|kubectl)\b/
+
+export function isReadOnlyCommand(command: string): boolean {
+  const normalized = unwrapShellCommand(command)
+  if (!normalized || normalized.includes(';')) {
+    return false
+  }
+  if (normalized.includes('>') || normalized.includes('<')) {
+    return false
+  }
+  if (WRITE_COMMAND_RE.test(normalized) || /\bsed\s+-i\b/.test(normalized)) {
+    return false
   }
 
+  const segments = normalized.split(/\s*(?:&&|\|\||\|)\s*/)
+  return segments.every((segment) => {
+    const trimmed = segment.trim()
+    if (!trimmed) {
+      return false
+    }
+    return SAFE_READ_ONLY_SEGMENTS.some((pattern) => pattern.test(trimmed))
+  })
+}
+
+export function selectFinalAssistantText(
+  assistantTexts: string[],
+): string | undefined {
+  return assistantTexts
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .at(-1)
+}
+
+export function formatCommandExecution(
+  command: CompletedCommand,
+): string | undefined {
+  if (command.exitCode === 0) {
+    return undefined
+  }
+
+  const output = truncate(command.output.trim(), 1200)
+  if (!output) {
+    if (command.exitCode === 0) {
+      return `Ran \`${command.command}\`.`
+    }
+    return `Command failed: \`${command.command}\` (exit ${command.exitCode}).`
+  }
+
+  const summary = command.exitCode === 0
+    ? `Ran \`${command.command}\`.`
+    : `Command failed: \`${command.command}\` (exit ${command.exitCode}).`
+
   return [
-    `Ran \`${command.command}\` (exit ${command.exitCode}).`,
+    summary,
     '```text',
     output,
     '```',
   ].join('\n')
+}
+
+export function formatCodexAssistantText(text: string): string | undefined {
+  const trimmed = stripMarkdownLinks(text).trim()
+  if (!trimmed) {
+    return undefined
+  }
+
+  const firstChar = trimmed[0] || ''
+  const markdownStarters = ['#', '*', '_', '-', '>', '`', '[', '|']
+  const startsWithMarkdown =
+    markdownStarters.includes(firstChar) || /^\d+\./.test(trimmed)
+
+  if (startsWithMarkdown) {
+    return `\n${trimmed}`
+  }
+
+  return `⬥ ${trimmed}`
+}
+
+export function formatCommandStarted(command: string): string | undefined {
+  const normalized = unwrapShellCommand(command)
+  if (!normalized) {
+    return undefined
+  }
+
+  const singleLine = !normalized.includes('\n')
+  if (!singleLine || normalized.length > 120) {
+    return undefined
+  }
+
+  return `┣ bash _${escapeInlineMarkdown(normalized)}_`
+}
+
+export function formatFileChanges(
+  changes: Array<{
+    path?: string
+    kind?: string
+  }>,
+): string | undefined {
+  if (changes.length === 0) {
+    return undefined
+  }
+
+  const normalizedKinds = [
+    ...new Set(changes.map((change) => normalizeFileChangeKind(change.kind))),
+  ]
+
+  if (normalizedKinds.length !== 1 || changes.length > 3) {
+    return `┣ changed ${changes.length} file${changes.length === 1 ? '' : 's'}`
+  }
+
+  const action = normalizedKinds[0] || 'changed'
+  const names = changes
+    .map((change) => {
+      const baseName = path.basename(change.path || '')
+      return baseName ? `*${escapeInlineMarkdown(baseName)}*` : undefined
+    })
+    .filter((name): name is string => Boolean(name))
+
+  if (names.length === 0) {
+    return `┣ ${action}`
+  }
+
+  return `┣ ${action} ${names.join(', ')}`
+}
+
+function normalizeFileChangeKind(kind: string | undefined): string {
+  switch (kind) {
+    case 'delete':
+    case 'removed':
+      return 'deleted'
+    case 'create':
+    case 'created':
+    case 'add':
+      return 'created'
+    case 'rename':
+    case 'renamed':
+      return 'renamed'
+    case 'update':
+    case 'updated':
+    case 'modify':
+    case 'modified':
+    case 'edit':
+    case 'edited':
+      return 'updated'
+    default:
+      return 'changed'
+  }
 }

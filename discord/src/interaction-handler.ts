@@ -55,6 +55,7 @@ import {
 import { handleUnsetModelCommand } from './commands/unset-model.js'
 import {
   handleCodexModelCommand,
+  handleCodexModelEffortSelectMenu,
   handleCodexModelScopeSelectMenu,
   handleCodexModelSelectMenu,
   handleCodexUnsetModelCommand,
@@ -469,6 +470,11 @@ export function registerInteractionHandler({
 
           if (customId.startsWith('codex_model_select:')) {
             await handleCodexModelSelectMenu(interaction)
+            return
+          }
+
+          if (customId.startsWith('codex_model_effort:')) {
+            await handleCodexModelEffortSelectMenu(interaction)
             return
           }
 
