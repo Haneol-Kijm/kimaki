@@ -7,6 +7,14 @@
     <br/>
 </div>
 
+## Fork Notice
+
+This repository is a personal fork/derivative of [remorses/kimaki](https://github.com/remorses/kimaki), with additional experiments and local modifications.
+
+It is maintained on a best-effort basis, with no promise of stability, API compatibility, or upstream alignment. All changes are AI-assisted.
+
+Original upstream copyright and license notices are preserved. Unless otherwise noted, this repository is distributed under the same MIT license terms; see `LICENSE`.
+
 Kimaki is a Discord bot that lets you control [OpenCode](https://opencode.ai) coding sessions from Discord. Send a message in a Discord channel → an AI agent edits code on your machine.
 
 ## Quick Start
