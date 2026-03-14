@@ -139,7 +139,7 @@ function buildWorktreeTable({
   const header = '| Thread | Name | Status | Created | Folder | Action |'
   const separator = '|---|---|---|---|---|---|'
   const rows = worktrees.map((wt, i) => {
-    const threadLink = `[thread](https://discord.com/channels/${guildId}/${wt.thread_id})`
+    const threadLink = `https://discord.com/channels/${guildId}/${wt.thread_id}`
     const name = wt.worktree_name
     const gs = gitStatuses[i] ?? null
     const status = (() => {

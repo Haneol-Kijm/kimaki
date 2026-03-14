@@ -400,7 +400,7 @@ async function applyVariant({
   const modelId = context.modelId
   const variantSuffix = variant ? ` (${variant})` : ''
   const agentTip =
-    '\n_Tip: create [agent .md files](https://github.com/remorses/kimaki/blob/main/docs/model-switching.md) in .opencode/agent/ for one-command model switching_'
+    '\n_Tip: create agent .md files in .opencode/agent/ for one-command model switching. Docs: https://github.com/remorses/kimaki/blob/main/docs/model-switching.md_'
 
   try {
     if (scope === 'session') {

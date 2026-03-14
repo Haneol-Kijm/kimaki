@@ -93,7 +93,7 @@ export async function handleDiffCommand({
       const urlMatch = output.match(/https?:\/\/critique\.work\/[^\s]+/)
       if (urlMatch) {
         await command.editReply({
-          content: `[diff](${urlMatch[0]})`,
+          content: urlMatch[0],
         })
         logger.log(`Diff shared: ${urlMatch[0]}`)
         return

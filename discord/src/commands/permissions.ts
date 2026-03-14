@@ -176,7 +176,7 @@ export async function showPermissionButtons({
   const subtaskLine = subtaskLabel ? `**From:** \`${subtaskLabel}\`\n` : ''
   const externalDirLine =
     permission.permission === 'external_directory'
-      ? `Agent is accessing files outside the project. [Learn more](https://opencode.ai/docs/permissions/#external-directories)\n`
+      ? 'Agent is accessing files outside the project. Learn more: https://opencode.ai/docs/permissions/#external-directories\n'
       : ''
   const fullContent =
     `⚠️ **Permission Required**\n` +
@@ -213,7 +213,7 @@ function updatePermissionMessage({
       const patternStr = compactPermissionPatterns(context.permission.patterns).join(', ')
       const externalDirLine =
         context.permission.permission === 'external_directory'
-          ? 'Agent is accessing files outside the project. [Learn more](https://opencode.ai/docs/permissions/#external-directories)\n'
+          ? 'Agent is accessing files outside the project. Learn more: https://opencode.ai/docs/permissions/#external-directories\n'
           : ''
       return message.edit({
         content:
