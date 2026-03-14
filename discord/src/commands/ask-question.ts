@@ -15,6 +15,8 @@ import { getOpencodeClient } from '../opencode.js'
 import { createLogger, LogPrefix } from '../logger.js'
 
 const logger = createLogger(LogPrefix.ASK_QUESTION)
+const QUESTION_CONTEXT_HANDOFF_DELAY_MS = 150
+const pendingQuestionCooldownUntil = new Map<string, number>()
 
 // Schema matching the question tool input
 export type AskUserQuestionInput = {
@@ -66,6 +68,13 @@ export async function showAskUserQuestionDropdowns({
   requestId: string // OpenCode question request ID
   input: AskUserQuestionInput
 }): Promise<void> {
+  const cooldownUntil = pendingQuestionCooldownUntil.get(thread.id)
+  if (cooldownUntil && cooldownUntil > Date.now()) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, cooldownUntil - Date.now())
+    })
+  }
+
   const contextHash = crypto.randomBytes(8).toString('hex')
 
   const context: PendingQuestionContext = {
@@ -81,6 +90,7 @@ export async function showAskUserQuestionDropdowns({
 
   }
 
+  pendingQuestionCooldownUntil.delete(thread.id)
   pendingQuestionContexts.set(contextHash, context)
   // On TTL expiry: hide the dropdown UI and abort the session so OpenCode
   // unblocks. We intentionally do NOT call question.reply() — sending 'Other'
@@ -368,5 +378,9 @@ export async function cancelPendingQuestion(
   }
 
   pendingQuestionContexts.delete(contextHash)
+  pendingQuestionCooldownUntil.set(
+    threadId,
+    Date.now() + QUESTION_CONTEXT_HANDOFF_DELAY_MS,
+  )
   return 'replied'
 }
