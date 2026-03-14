@@ -3,10 +3,13 @@
 // and manages autocomplete, select menu interactions for the bot.
 
 import {
+  ChannelType,
   Events,
   MessageFlags,
   type Client,
   type Interaction,
+  type TextChannel,
+  type ThreadChannel,
 } from 'discord.js'
 import {
   handleSessionCommand,
@@ -23,6 +26,7 @@ import {
 import { handleToggleWorktreesCommand } from './commands/worktree-settings.js'
 import { handleWorktreesCommand } from './commands/worktrees.js'
 import { handleToggleMentionModeCommand } from './commands/mention-mode.js'
+import { handleBackendCommand } from './commands/backend.js'
 import {
   handleResumeCommand,
   handleResumeAutocomplete,
@@ -50,6 +54,12 @@ import {
 } from './commands/model.js'
 import { handleUnsetModelCommand } from './commands/unset-model.js'
 import {
+  handleCodexModelCommand,
+  handleCodexModelScopeSelectMenu,
+  handleCodexModelSelectMenu,
+  handleCodexUnsetModelCommand,
+} from './commands/codex-model.js'
+import {
   handleLoginCommand,
   handleLoginProviderSelectMenu,
   handleLoginMethodSelectMenu,
@@ -71,6 +81,7 @@ import {
   handleFileUploadModalSubmit,
 } from './commands/file-upload.js'
 import { handleActionButton } from './commands/action-buttons.js'
+import { handleCodexRetryButton } from './commands/codex-retry.js'
 import { handleHtmlActionButton } from './html-actions.js'
 import {
   handleQueueCommand,
@@ -99,8 +110,27 @@ import {
 import { hasKimakiBotPermission } from './discord-utils.js'
 import { createLogger, LogPrefix } from './logger.js'
 import { notifyError } from './sentry.js'
+import { resolveChannelLikeBackend } from './session-backend.js'
 
 const interactionLogger = createLogger(LogPrefix.INTERACTION)
+
+async function getInteractionBackend(
+  interaction: Interaction,
+): Promise<'opencode' | 'codex'> {
+  const channel = interaction.channel
+  if (!channel) {
+    return 'opencode'
+  }
+  if (
+    channel.type !== ChannelType.GuildText &&
+    channel.type !== ChannelType.PublicThread &&
+    channel.type !== ChannelType.PrivateThread &&
+    channel.type !== ChannelType.AnnouncementThread
+  ) {
+    return 'opencode'
+  }
+  return resolveChannelLikeBackend(channel as TextChannel | ThreadChannel)
+}
 
 export function registerInteractionHandler({
   discordClient,
@@ -208,6 +238,13 @@ export function registerInteractionHandler({
               })
               return
 
+            case 'backend':
+              await handleBackendCommand({
+                command: interaction,
+                appId,
+              })
+              return
+
             case 'resume':
               await handleResumeCommand({ command: interaction, appId })
               return
@@ -249,14 +286,29 @@ export function registerInteractionHandler({
               return
 
             case 'model':
+              if (await getInteractionBackend(interaction) === 'codex') {
+                await handleCodexModelCommand({ interaction })
+                return
+              }
               await handleModelCommand({ interaction, appId })
               return
 
             case 'model-variant':
+              if (await getInteractionBackend(interaction) === 'codex') {
+                await interaction.reply({
+                  content: 'Thinking variants are not supported for Codex sessions yet.',
+                  flags: MessageFlags.Ephemeral,
+                })
+                return
+              }
               await handleModelVariantCommand({ interaction, appId })
               return
 
             case 'unset-model-override':
+              if (await getInteractionBackend(interaction) === 'codex') {
+                await handleCodexUnsetModelCommand({ interaction })
+                return
+              }
               await handleUnsetModelCommand({ interaction, appId })
               return
 
@@ -367,6 +419,11 @@ export function registerInteractionHandler({
             return
           }
 
+          if (customId.startsWith('codex_retry:')) {
+            await handleCodexRetryButton(interaction)
+            return
+          }
+
           if (
             customId.startsWith('permission_once:') ||
             customId.startsWith('permission_always:') ||
@@ -407,6 +464,16 @@ export function registerInteractionHandler({
 
           if (customId.startsWith('fork_select:')) {
             await handleForkSelectMenu(interaction)
+            return
+          }
+
+          if (customId.startsWith('codex_model_select:')) {
+            await handleCodexModelSelectMenu(interaction)
+            return
+          }
+
+          if (customId.startsWith('codex_model_scope:')) {
+            await handleCodexModelScopeSelectMenu(interaction)
             return
           }
 

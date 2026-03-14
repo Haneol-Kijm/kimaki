@@ -13,12 +13,16 @@ import {
   setThreadSession,
   setPartMessagesBatch,
   getAllThreadSessionIds,
+  getKnownSessionIdsForBackend,
+  hasKnownSessionIdForBackend,
+  setThreadBackend,
 } from '../database.js'
 import { initializeOpencodeForDirectory } from '../opencode.js'
 import { sendThreadMessage, resolveProjectDirectoryFromAutocomplete } from '../discord-utils.js'
 import { collectLastAssistantParts } from '../message-formatting.js'
 import { createLogger, LogPrefix } from '../logger.js'
 import * as errore from 'errore'
+import { resolveChannelBackendOrDefault } from '../session-backend.js'
 
 const logger = createLogger(LogPrefix.RESUME)
 
@@ -68,6 +72,40 @@ export async function handleResumeCommand({
   }
 
   try {
+    const backend = await resolveChannelBackendOrDefault(textChannel.id)
+
+    if (backend === 'codex') {
+      const known = await hasKnownSessionIdForBackend({
+        sessionId,
+        backend: 'codex',
+      })
+      if (!known) {
+        await command.editReply(
+          'This Codex session ID is unknown to Kimaki. Use a session created by this bot first.',
+        )
+        return
+      }
+
+      const thread = await textChannel.threads.create({
+        name: `Resume: ${sessionId}`.slice(0, 100),
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+        reason: `Resuming Codex session ${sessionId}`,
+      })
+
+      await thread.members.add(command.user.id)
+      await setThreadBackend({ threadId: thread.id, backend: 'codex' })
+      await setThreadSession(thread.id, sessionId)
+
+      await command.editReply(
+        `Resumed Codex session \`${sessionId}\` in ${thread.toString()}`,
+      )
+      await sendThreadMessage(
+        thread,
+        `**Resumed Codex session**\nSession ID: \`${sessionId}\`\nSend a message in this thread to continue.`,
+      )
+      return
+    }
+
     const getClient = await initializeOpencodeForDirectory(projectDirectory)
     if (getClient instanceof Error) {
       await command.editReply(getClient.message)
@@ -179,6 +217,21 @@ export async function handleResumeAutocomplete({
   }
 
   try {
+    const backend = await resolveChannelBackendOrDefault(interaction.channelId)
+    if (backend === 'codex') {
+      const sessions = (await getKnownSessionIdsForBackend({
+        backend: 'codex',
+      }))
+        .filter((id) => id.toLowerCase().includes(focusedValue.toLowerCase()))
+        .slice(0, 25)
+        .map((id) => ({
+          name: id.slice(0, 100),
+          value: id,
+        }))
+      await interaction.respond(sessions)
+      return
+    }
+
     const getClient = await initializeOpencodeForDirectory(projectDirectory)
     if (getClient instanceof Error) {
       await interaction.respond([])

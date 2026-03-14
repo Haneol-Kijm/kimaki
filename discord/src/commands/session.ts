@@ -10,6 +10,7 @@ import { SILENT_MESSAGE_FLAGS, resolveProjectDirectoryFromAutocomplete } from '.
 import { getOrCreateRuntime } from '../session-handler/thread-session-runtime.js'
 import { createLogger, LogPrefix } from '../logger.js'
 import * as errore from 'errore'
+import { resolveChannelBackendOrDefault } from '../session-backend.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 
@@ -47,10 +48,14 @@ export async function handleSessionCommand({
   }
 
   try {
-    const getClient = await initializeOpencodeForDirectory(projectDirectory)
-    if (getClient instanceof Error) {
-      await command.editReply(getClient.message)
-      return
+    const backend = await resolveChannelBackendOrDefault(textChannel.id)
+
+    if (backend === 'opencode') {
+      const getClient = await initializeOpencodeForDirectory(projectDirectory)
+      if (getClient instanceof Error) {
+        await command.editReply(getClient.message)
+        return
+      }
     }
 
     const files = filesString
@@ -63,15 +68,16 @@ export async function handleSessionCommand({
       fullPrompt = `${prompt}\n\n@${files.join(' @')}`
     }
 
+    const sessionLabel = backend === 'codex' ? 'Codex' : 'OpenCode'
     const starterMessage = await textChannel.send({
-      content: `🚀 **Starting OpenCode session**\n📝 ${prompt}${files.length > 0 ? `\n📎 Files: ${files.join(', ')}` : ''}`,
+      content: `Starting ${sessionLabel} session\n${prompt}${files.length > 0 ? `\nFiles: ${files.join(', ')}` : ''}`,
       flags: SILENT_MESSAGE_FLAGS,
     })
 
     const thread = await starterMessage.startThread({
       name: prompt.slice(0, 100),
       autoArchiveDuration: 1440,
-      reason: 'OpenCode session',
+      reason: `${sessionLabel} session`,
     })
 
     // Add user to thread so it appears in their sidebar
@@ -79,7 +85,7 @@ export async function handleSessionCommand({
 
     await command.editReply(`Created new session in ${thread.toString()}`)
 
-    const runtime = getOrCreateRuntime({
+    const runtime = await getOrCreateRuntime({
       threadId: thread.id,
       thread,
       projectDirectory,
@@ -160,8 +166,13 @@ export async function handleSessionAutocomplete({
   interaction,
 }: AutocompleteContext): Promise<void> {
   const focusedOption = interaction.options.getFocused(true)
+  const backend = await resolveChannelBackendOrDefault(interaction.channelId)
 
   if (focusedOption.name === 'agent') {
+    if (backend === 'codex') {
+      await interaction.respond([])
+      return
+    }
     await handleAgentAutocomplete({ interaction })
     return
   }
@@ -182,6 +193,11 @@ export async function handleSessionAutocomplete({
   const projectDirectory = await resolveProjectDirectoryFromAutocomplete(interaction)
 
   if (!projectDirectory) {
+    await interaction.respond([])
+    return
+  }
+
+  if (backend === 'codex') {
     await interaction.respond([])
     return
   }

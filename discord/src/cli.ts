@@ -871,6 +871,22 @@ async function registerCommands({
       .setDMPermission(false)
       .toJSON(),
     new SlashCommandBuilder()
+      .setName('backend')
+      .setDescription('Show or set the backend for this project channel')
+      .addStringOption((option) => {
+        option
+          .setName('backend')
+          .setDescription('Backend to use for new threads in this channel')
+          .setRequired(false)
+          .addChoices(
+            { name: 'OpenCode', value: 'opencode' },
+            { name: 'Codex CLI', value: 'codex' },
+          )
+        return option
+      })
+      .setDMPermission(false)
+      .toJSON(),
+    new SlashCommandBuilder()
       .setName('add-project')
       .setDescription(
         'Create Discord channels for a project. Use `npx kimaki project add` for unlisted projects',

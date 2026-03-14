@@ -17,6 +17,7 @@ import {
   initializeOpencodeForDirectory,
 } from '../opencode.js'
 import { createLogger, LogPrefix } from '../logger.js'
+import { resolveThreadBackend } from '../session-backend.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 
@@ -69,6 +70,11 @@ export async function handleSessionIdCommand({
 
   const { projectDirectory, workingDirectory } = resolved
   const sessionId = await getThreadSession(channel.id)
+  const thread = channel as ThreadChannel
+  const backend = await resolveThreadBackend({
+    threadId: thread.id,
+    channelId: thread.parentId || undefined,
+  })
 
   if (!sessionId) {
     await command.reply({
@@ -79,6 +85,15 @@ export async function handleSessionIdCommand({
   }
 
   await command.deferReply({ flags: SILENT_MESSAGE_FLAGS })
+
+  if (backend === 'codex') {
+    const attachCommand = `cd ${shellQuote(workingDirectory)} && codex exec resume --json ${shellQuote(sessionId)} -- 'your prompt here'`
+    await command.editReply({
+      content: `**Session ID:** \`${sessionId}\`\n**Resume command:**\n\`\`\`bash\n${attachCommand}\n\`\`\``,
+    })
+    logger.log(`Codex session ID shown for thread ${channel.id}: ${sessionId}`)
+    return
+  }
 
   let port = getOpencodeServerPort(projectDirectory)
   if (!port) {

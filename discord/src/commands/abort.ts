@@ -15,6 +15,7 @@ import {
 } from '../discord-utils.js'
 import { getRuntime } from '../session-handler/thread-session-runtime.js'
 import { createLogger, LogPrefix } from '../logger.js'
+import { resolveThreadBackend } from '../session-backend.js'
 
 const logger = createLogger(LogPrefix.ABORT)
 
@@ -61,6 +62,11 @@ export async function handleAbortCommand({
   const { projectDirectory } = resolved
 
   const sessionId = await getThreadSession(channel.id)
+  const thread = channel as ThreadChannel
+  const backend = await resolveThreadBackend({
+    threadId: thread.id,
+    channelId: thread.parentId || undefined,
+  })
 
   if (!sessionId) {
     await command.reply({
@@ -74,7 +80,7 @@ export async function handleAbortCommand({
   const runtime = getRuntime(channel.id)
   if (runtime) {
     runtime.abortActiveRun('user-requested')
-  } else {
+  } else if (backend === 'opencode') {
     // No runtime but session exists — fall back to direct API abort
     const getClient = await initializeOpencodeForDirectory(projectDirectory)
     if (getClient instanceof Error) {
