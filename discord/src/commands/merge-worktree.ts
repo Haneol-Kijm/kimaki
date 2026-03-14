@@ -71,7 +71,7 @@ async function sendPromptToModel({
   const resolved = await resolveWorkingDirectory({ channel: thread })
 
   // Merge prompts use opencode queue mode.
-  const runtime = getOrCreateRuntime({
+  const runtime = await getOrCreateRuntime({
     threadId: thread.id,
     thread,
     projectDirectory: resolved?.projectDirectory || projectDirectory,

@@ -119,7 +119,7 @@ export const handleUserCommand: CommandHandler = async ({
       // Running in existing thread - just send the command
       await command.editReply(`Running /${commandName}...`)
 
-      const runtime = getOrCreateRuntime({
+      const runtime = await getOrCreateRuntime({
         threadId: thread.id,
         thread,
         projectDirectory,
@@ -162,7 +162,7 @@ export const handleUserCommand: CommandHandler = async ({
         `Started /${commandName} in ${newThread.toString()}`,
       )
 
-      const runtime = getOrCreateRuntime({
+      const runtime = await getOrCreateRuntime({
         threadId: newThread.id,
         thread: newThread,
         projectDirectory,

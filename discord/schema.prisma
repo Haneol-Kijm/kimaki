@@ -20,6 +20,7 @@ model thread_sessions {
   session_events  session_events[]
   scheduled_tasks scheduled_tasks[]
   thread_worktree thread_worktrees?
+  thread_backend  thread_backends?
   ipc_requests    ipc_requests[]
 }
 
@@ -75,6 +76,7 @@ model channel_directories {
 
   channel_model        channel_models?
   channel_agent        channel_agents?
+  channel_backend      channel_backends?
   channel_worktree     channel_worktrees?
   channel_verbosity    channel_verbosity?
   channel_mention_mode channel_mention_mode?
@@ -84,6 +86,28 @@ model channel_directories {
 enum ChannelType {
   text
   voice
+}
+
+enum session_backend {
+  opencode
+  codex
+}
+
+model channel_backends {
+  channel_id  String          @id
+  backend     session_backend
+  created_at  DateTime?       @default(now())
+  updated_at  DateTime?       @default(now()) @updatedAt
+
+  channel channel_directories @relation(fields: [channel_id], references: [channel_id])
+}
+
+model thread_backends {
+  thread_id   String          @id
+  backend     session_backend
+  created_at  DateTime?       @default(now())
+
+  thread thread_sessions @relation(fields: [thread_id], references: [thread_id])
 }
 
 model bot_api_keys {

@@ -37,6 +37,19 @@ CREATE TABLE IF NOT EXISTS "channel_directories" (
     "channel_type" TEXT NOT NULL,
     "created_at" DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS "channel_backends" (
+    "channel_id" TEXT NOT NULL PRIMARY KEY,
+    "backend" TEXT NOT NULL,
+    "created_at" DATETIME DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "channel_backends_channel_id_fkey" FOREIGN KEY ("channel_id") REFERENCES "channel_directories" ("channel_id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS "thread_backends" (
+    "thread_id" TEXT NOT NULL PRIMARY KEY,
+    "backend" TEXT NOT NULL,
+    "created_at" DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "thread_backends_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "thread_sessions" ("thread_id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
 CREATE TABLE IF NOT EXISTS "bot_api_keys" (
     "app_id" TEXT NOT NULL PRIMARY KEY,
     "gemini_api_key" TEXT,

@@ -68,7 +68,7 @@ export async function handleQueueCommand({
     return
   }
 
-  const runtime = getOrCreateRuntime({
+  const runtime = await getOrCreateRuntime({
     threadId: thread.id,
     thread,
     projectDirectory: resolved.projectDirectory,
@@ -213,7 +213,7 @@ export async function handleQueueCommandCommand({
     return
   }
 
-  const runtime = getOrCreateRuntime({
+  const runtime = await getOrCreateRuntime({
     threadId: thread.id,
     thread,
     projectDirectory: resolved.projectDirectory,

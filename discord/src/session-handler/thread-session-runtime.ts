@@ -41,6 +41,7 @@ import {
   setPartMessage,
   getThreadSession,
   setThreadSession,
+  setThreadBackend,
   getThreadWorktree,
   setSessionAgent,
   getVariantCascade,
@@ -127,6 +128,8 @@ import { notifyError } from '../sentry.js'
 import { createDebouncedProcessFlush } from '../debounced-process-flush.js'
 import { cancelHtmlActionsForThread } from '../html-actions.js'
 import { createDebouncedTimeout } from '../debounce-timeout.js'
+import { CodexThreadRuntime } from './codex-thread-runtime.js'
+import { resolveThreadBackend } from '../session-backend.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 const discordLogger = createLogger(LogPrefix.DISCORD)
@@ -139,20 +142,21 @@ const shouldLogSessionEvents =
 // Runtime instances are kept in a plain Map (not Zustand — the Map
 // is not reactive state, just a lookup for resource handles).
 
-const runtimes = new Map<string, ThreadSessionRuntime>()
+const runtimes = new Map<string, SessionRuntime>()
+const pendingRuntimeCreations = new Map<string, Promise<SessionRuntime>>()
 
 subscribeOpencodeServerLifecycle((event) => {
   if (event.type !== 'started') {
     return
   }
   for (const runtime of runtimes.values()) {
-    runtime.handleSharedServerStarted({ port: event.port })
+    runtime.handleSharedServerStarted?.({ port: event.port })
   }
 })
 
 export function getRuntime(
   threadId: string,
-): ThreadSessionRuntime | undefined {
+): SessionRuntime | undefined {
   return runtimes.get(threadId)
 }
 
@@ -165,25 +169,78 @@ export type RuntimeOptions = {
   appId?: string
 }
 
-export function getOrCreateRuntime(
+export type SessionRuntime = {
+  readonly threadId: string
+  readonly projectDirectory: string
+  sdkDirectory: string
+  readonly channelId: string | undefined
+  readonly appId: string | undefined
+  readonly thread: ThreadChannel
+  enqueueIncoming(input: IngressInput): Promise<EnqueueResult>
+  abortActiveRun(reason: string): void
+  getQueueLength(): number
+  clearQueue(): void
+  retryLastUserPrompt(options?: {
+    sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
+  }): Promise<boolean>
+  dispose(): void
+  isIdleForInactivityTimeout(opts: { idleMs: number; nowMs?: number }): boolean
+  handleDirectoryChanged?(opts: {
+    oldDirectory: string
+    newDirectory: string
+  }): void
+  handleSharedServerStarted?(opts: { port: number }): void
+}
+
+export async function getOrCreateRuntime(
   opts: RuntimeOptions,
-): ThreadSessionRuntime {
+): Promise<SessionRuntime> {
   const existing = runtimes.get(opts.threadId)
   if (existing) {
     // Reconcile sdkDirectory: worktree threads transition from pending
     // (projectDirectory) to ready (worktree path) after runtime creation.
     if (existing.sdkDirectory !== opts.sdkDirectory) {
-      existing.handleDirectoryChanged({
+      existing.handleDirectoryChanged?.({
         oldDirectory: existing.sdkDirectory,
         newDirectory: opts.sdkDirectory,
       })
     }
     return existing
   }
+  const pending = pendingRuntimeCreations.get(opts.threadId)
+  if (pending) {
+    return pending
+  }
+
   threadState.ensureThread(opts.threadId) // add to global store
-  const runtime = new ThreadSessionRuntime(opts)
-  runtimes.set(opts.threadId, runtime)
-  return runtime
+  const createPromise = (async () => {
+    const backend = await resolveThreadBackend({
+      threadId: opts.threadId,
+      channelId: opts.channelId,
+    })
+    await setThreadBackend({
+      threadId: opts.threadId,
+      backend,
+    })
+
+    const createdRuntime = backend === 'codex'
+      ? new CodexThreadRuntime(opts)
+      : new ThreadSessionRuntime(opts)
+
+    const alreadyCreated = runtimes.get(opts.threadId)
+    if (alreadyCreated) {
+      createdRuntime.dispose()
+      return alreadyCreated
+    }
+
+    runtimes.set(opts.threadId, createdRuntime)
+    return createdRuntime
+  })().finally(() => {
+    pendingRuntimeCreations.delete(opts.threadId)
+  })
+
+  pendingRuntimeCreations.set(opts.threadId, createPromise)
+  return createPromise
 }
 
 export function disposeRuntime(threadId: string): void {
@@ -193,6 +250,7 @@ export function disposeRuntime(threadId: string): void {
   }
   runtime.dispose()
   runtimes.delete(threadId)
+  pendingRuntimeCreations.delete(threadId)
   threadState.removeThread(threadId) // remove from global store
 }
 
@@ -213,6 +271,7 @@ export function disposeRuntimesForDirectory({
     }
     runtime.dispose()
     runtimes.delete(threadId)
+    pendingRuntimeCreations.delete(threadId)
     threadState.removeThread(threadId)
     count++
   }
@@ -243,6 +302,7 @@ export function disposeInactiveRuntimes({
   for (const [threadId, runtime] of candidates) {
     runtime.dispose()
     runtimes.delete(threadId)
+    pendingRuntimeCreations.delete(threadId)
     threadState.removeThread(threadId)
     disposedThreadIds.push(threadId)
     disposedDirectories.add(runtime.projectDirectory)
@@ -425,6 +485,7 @@ export type IngressInput = {
   // First-dispatch-only overrides (used when creating a new session)
   agent?: string
   model?: string
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
   sessionStartSource?: { scheduleKind: 'at' | 'cron'; scheduledTaskId?: number }
   /** Optional guard for retries: skip enqueue when session has changed. */
   expectedSessionId?: string
@@ -450,7 +511,7 @@ type AbortRunOutcome = {
 
 // ── Runtime class ────────────────────────────────────────────────
 
-export class ThreadSessionRuntime {
+export class ThreadSessionRuntime implements SessionRuntime {
   readonly threadId: string
   readonly projectDirectory: string
   // Mutable: worktree threads transition from pending (projectDirectory)
@@ -3642,7 +3703,9 @@ export class ThreadSessionRuntime {
    * current session history with the updated model preference, without
    * replaying/fetching the last user message in kimaki.
    */
-  async retryLastUserPrompt(): Promise<boolean> {
+  async retryLastUserPrompt(_options?: {
+    sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
+  }): Promise<boolean> {
     const state = this.state
     if (!state?.sessionId) {
       logger.log(`[RETRY] No session for thread ${this.threadId}`)

@@ -39,6 +39,7 @@ export type QueuedMessage = {
   // Set by --agent/--model flags on kimaki send or slash commands.
   agent?: string
   model?: string
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
   // Tracking fields for scheduled tasks. Stored in the DB via
   // setSessionStartSource() after the session is created, so the session
   // list can show which sessions were started by scheduled tasks.
@@ -141,6 +142,10 @@ export function removeThread(threadId: string): void {
 
 export function setSessionId(threadId: string, sessionId: string): void {
   updateThread(threadId, (t) => ({ ...t, sessionId }))
+}
+
+export function clearSessionId(threadId: string): void {
+  updateThread(threadId, (t) => ({ ...t, sessionId: undefined }))
 }
 
 export function enqueueItem(threadId: string, item: QueuedMessage): void {

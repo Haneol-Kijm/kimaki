@@ -163,7 +163,7 @@ export async function handleCreateNewProjectCommand({
     // Add user to thread so it appears in their sidebar
     await thread.members.add(command.user.id)
 
-    const runtime = getOrCreateRuntime({
+    const runtime = await getOrCreateRuntime({
       threadId: thread.id,
       thread,
       projectDirectory,

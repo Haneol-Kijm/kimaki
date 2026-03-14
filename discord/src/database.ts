@@ -932,6 +932,134 @@ export async function getChannelDirectory(channelId: string): Promise<
 }
 
 // ============================================================================
+// Channel / Thread Backend Functions
+// ============================================================================
+
+export type SessionBackend = 'opencode' | 'codex'
+
+export async function getChannelBackend(
+  channelId: string,
+): Promise<SessionBackend | undefined> {
+  const prisma = await getPrisma()
+  const rows = await prisma.$queryRawUnsafe<Array<{ backend: SessionBackend }>>(
+    'SELECT backend FROM channel_backends WHERE channel_id = ? LIMIT 1',
+    channelId,
+  )
+  const row = rows[0]
+  return row?.backend
+}
+
+export async function setChannelBackend({
+  channelId,
+  backend,
+}: {
+  channelId: string
+  backend: SessionBackend
+}): Promise<void> {
+  const prisma = await getPrisma()
+  await prisma.$executeRawUnsafe(
+    `
+      INSERT INTO channel_backends (channel_id, backend, created_at, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(channel_id) DO UPDATE SET
+        backend = excluded.backend,
+        updated_at = CURRENT_TIMESTAMP
+    `,
+    channelId,
+    backend,
+  )
+}
+
+export async function getThreadBackend(
+  threadId: string,
+): Promise<SessionBackend | undefined> {
+  const prisma = await getPrisma()
+  const rows = await prisma.$queryRawUnsafe<Array<{ backend: SessionBackend }>>(
+    'SELECT backend FROM thread_backends WHERE thread_id = ? LIMIT 1',
+    threadId,
+  )
+  const row = rows[0]
+  return row?.backend
+}
+
+/**
+ * Persist the backend for a thread.
+ * Ensures the parent thread_sessions row exists first so the FK is satisfied.
+ */
+export async function setThreadBackend({
+  threadId,
+  backend,
+}: {
+  threadId: string
+  backend: SessionBackend
+}): Promise<void> {
+  const prisma = await getPrisma()
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(
+      `
+        INSERT INTO thread_sessions (thread_id, session_id, created_at)
+        VALUES (?, '', CURRENT_TIMESTAMP)
+        ON CONFLICT(thread_id) DO NOTHING
+      `,
+      threadId,
+    ),
+    prisma.$executeRawUnsafe(
+      `
+        INSERT INTO thread_backends (thread_id, backend, created_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(thread_id) DO UPDATE SET
+          backend = excluded.backend
+      `,
+      threadId,
+      backend,
+    ),
+  ])
+}
+
+export async function getKnownSessionIdsForBackend({
+  backend,
+}: {
+  backend: SessionBackend
+}): Promise<string[]> {
+  const prisma = await getPrisma()
+  const rows = await prisma.$queryRawUnsafe<Array<{ session_id: string }>>(
+    `
+      SELECT ts.session_id
+      FROM thread_backends tb
+      JOIN thread_sessions ts ON ts.thread_id = tb.thread_id
+      WHERE tb.backend = ? AND ts.session_id != ''
+    `,
+    backend,
+  )
+  return rows
+    .map((row) => row.session_id)
+    .filter((sessionId) => sessionId.length > 0)
+}
+
+export async function hasKnownSessionIdForBackend({
+  sessionId,
+  backend,
+}: {
+  sessionId: string
+  backend: SessionBackend
+}): Promise<boolean> {
+  const prisma = await getPrisma()
+  const rows = await prisma.$queryRawUnsafe<Array<{ thread_id: string }>>(
+    `
+      SELECT tb.thread_id
+      FROM thread_backends tb
+      JOIN thread_sessions ts ON ts.thread_id = tb.thread_id
+      WHERE tb.backend = ? AND ts.session_id = ?
+      LIMIT 1
+    `,
+    backend,
+    sessionId,
+  )
+  const row = rows[0]
+  return Boolean(row)
+}
+
+// ============================================================================
 // Thread Session Functions
 // ============================================================================
 
@@ -945,7 +1073,7 @@ export async function getThreadSession(
   const row = await prisma.thread_sessions.findUnique({
     where: { thread_id: threadId },
   })
-  return row?.session_id
+  return row?.session_id || undefined
 }
 
 /**

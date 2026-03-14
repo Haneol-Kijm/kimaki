@@ -165,7 +165,7 @@ async function sendClickedActionToModel({
   const username = interaction.user.globalName || interaction.user.username
 
   // Action button clicks use opencode queue mode.
-  const runtime = getOrCreateRuntime({
+  const runtime = await getOrCreateRuntime({
     threadId: thread.id,
     thread,
     projectDirectory: resolved.projectDirectory,

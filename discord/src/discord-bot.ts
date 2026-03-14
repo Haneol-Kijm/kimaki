@@ -581,7 +581,7 @@ export async function startDiscordBot({
           worktreeInfo.worktree_directory
             ? worktreeInfo.worktree_directory
             : resolvedProjectDir
-        const runtime = getOrCreateRuntime({
+        const runtime = await getOrCreateRuntime({
           threadId: thread.id,
           thread,
           projectDirectory: resolvedProjectDir,
@@ -788,7 +788,7 @@ export async function startDiscordBot({
           }
         }
 
-        const channelRuntime = getOrCreateRuntime({
+        const channelRuntime = await getOrCreateRuntime({
           threadId: thread.id,
           thread,
           projectDirectory: sessionDirectory,
@@ -998,7 +998,7 @@ export async function startDiscordBot({
 
       const botThreadStartSource = parseSessionStartSourceFromMarker(marker)
 
-      const runtime = getOrCreateRuntime({
+      const runtime = await getOrCreateRuntime({
         threadId: thread.id,
         thread,
         projectDirectory,
