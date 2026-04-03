@@ -2298,15 +2298,18 @@ cli
 cli
   .command(
     'upload-to-discord [...files]',
-    'Upload files to a Discord thread for a session',
+    'Upload files to a Discord thread for a session or thread ID',
   )
   .option('-s, --session <sessionId>', 'OpenCode session ID')
-  .action(async (files: string[], options: { session?: string }) => {
+  .option('-t, --thread <threadId>', 'Discord thread ID')
+  .action(async (files: string[], options: { session?: string; thread?: string }) => {
     try {
-      const { session: sessionId } = options
+      const { session: sessionId, thread: providedThreadId } = options
 
-      if (!sessionId) {
-        cliLogger.error('Session ID is required. Use --session <sessionId>')
+      if (!sessionId && !providedThreadId) {
+        cliLogger.error(
+          'A session ID or thread ID is required. Use --session <sessionId> or --thread <threadId>',
+        )
         process.exit(EXIT_NO_RESTART)
       }
 
@@ -2325,7 +2328,8 @@ cli
 
       await initDatabase()
 
-      const threadId = await getThreadIdBySessionId(sessionId)
+      const threadId = providedThreadId ||
+        (sessionId ? await getThreadIdBySessionId(sessionId) : undefined)
 
       if (!threadId) {
         cliLogger.error(`No Discord thread found for session: ${sessionId}`)

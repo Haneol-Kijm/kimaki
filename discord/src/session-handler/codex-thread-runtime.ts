@@ -437,11 +437,13 @@ export class CodexThreadRuntime implements SessionRuntime {
         username: input.username,
         isSlashCommand: true,
         includeCritiqueInstructions: store.getState().critiqueEnabled,
+        threadId: this.threadId,
       })
       : buildCodexPrompt({
         prompt: input.prompt,
         username: input.username,
         includeCritiqueInstructions: store.getState().critiqueEnabled,
+        threadId: this.threadId,
       })
 
     this.ensureTypingKeepalive()

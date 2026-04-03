@@ -3,11 +3,13 @@ export function buildCodexPrompt({
   username,
   isSlashCommand,
   includeCritiqueInstructions,
+  threadId,
 }: {
   prompt: string
   username?: string
   isSlashCommand?: boolean
   includeCritiqueInstructions?: boolean
+  threadId?: string
 }): string {
   const header = [
     'You are replying inside a Discord thread that is often read on mobile.',
@@ -31,8 +33,19 @@ export function buildCodexPrompt({
   const commandContext = isSlashCommand
     ? 'The user triggered this through a Kimaki slash-command queue.'
     : ''
+  const uploadContext = threadId
+    ? `Current Discord thread ID: ${threadId}. If you need to upload files or screenshots back to Discord, run \`kimaki upload-to-discord --thread ${threadId} <paths...>\`.`
+    : ''
 
-  return [header, critiqueInstructions, userContext, commandContext, '', prompt]
+  return [
+    header,
+    critiqueInstructions,
+    userContext,
+    commandContext,
+    uploadContext,
+    '',
+    prompt,
+  ]
     .filter((part) => part.trim().length > 0)
     .join('\n\n')
 }
