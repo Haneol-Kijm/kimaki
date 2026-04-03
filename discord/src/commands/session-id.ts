@@ -1,4 +1,4 @@
-// /session-id command - Show current session ID and an opencode attach command.
+// /session-id command - Show current session ID and a Codex resume command.
 
 import {
   ChannelType,
@@ -12,10 +12,6 @@ import {
   resolveWorkingDirectory,
   SILENT_MESSAGE_FLAGS,
 } from '../discord-utils.js'
-import {
-  getOpencodeServerPort,
-  initializeOpencodeForDirectory,
-} from '../opencode.js'
 import { createLogger, LogPrefix } from '../logger.js'
 
 const logger = createLogger(LogPrefix.SESSION)
@@ -67,7 +63,7 @@ export async function handleSessionIdCommand({
     return
   }
 
-  const { projectDirectory, workingDirectory } = resolved
+  const { workingDirectory } = resolved
   const sessionId = await getThreadSession(channel.id)
 
   if (!sessionId) {
@@ -80,30 +76,12 @@ export async function handleSessionIdCommand({
 
   await command.deferReply({ flags: SILENT_MESSAGE_FLAGS })
 
-  let port = getOpencodeServerPort(projectDirectory)
-  if (!port) {
-    const getClient = await initializeOpencodeForDirectory(projectDirectory)
-    if (getClient instanceof Error) {
-      await command.editReply({
-        content: `Session ID: \`${sessionId}\`\nFailed to resolve OpenCode server port: ${getClient.message}`,
-      })
-      return
-    }
-    port = getOpencodeServerPort(projectDirectory)
-  }
-
-  if (!port) {
-    await command.editReply({
-      content: `Session ID: \`${sessionId}\`\nCould not determine OpenCode server port`,
-    })
-    return
-  }
-
-  const attachUrl = `http://127.0.0.1:${port}`
-  const attachCommand = `opencode attach ${attachUrl} --session ${sessionId} --dir ${shellQuote(workingDirectory)}`
+  const attachCommand =
+    `cd ${shellQuote(workingDirectory)} && codex exec resume --json ${shellQuote(sessionId)} -- 'your prompt here'`
 
   await command.editReply({
-    content: `**Session ID:** \`${sessionId}\`\n**Attach command:**\n\`\`\`bash\n${attachCommand}\n\`\`\``,
+    content:
+      `**Session ID:** \`${sessionId}\`\n**Resume command:**\n\`\`\`bash\n${attachCommand}\n\`\`\``,
   })
-  logger.log(`Session ID shown for thread ${channel.id}: ${sessionId}`)
+  logger.log(`Codex session ID shown for thread ${channel.id}: ${sessionId}`)
 }

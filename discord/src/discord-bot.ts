@@ -77,7 +77,6 @@ import { notifyError } from './sentry.js'
 import { flushDebouncedProcessCallbacks } from './debounced-process-flush.js'
 import { startRuntimeIdleSweeper } from './runtime-idle-sweeper.js'
 import {
-  startExternalOpencodeSessionSync,
   stopExternalOpencodeSessionSync,
 } from './external-opencode-sync.js'
 
@@ -285,7 +284,6 @@ export async function startDiscordBot({
 
     registerInteractionHandler({ discordClient: c, appId: currentAppId })
     registerVoiceStateHandler({ discordClient: c, appId: currentAppId })
-    startExternalOpencodeSessionSync({ discordClient: c })
 
     // Channel logging is informational only; do it in background so startup stays responsive.
     void (async () => {
@@ -641,9 +639,9 @@ export async function startDiscordBot({
           cancelHtmlActionsForThread(thread.id)
           const dismissedPermission = await cancelPendingPermission(thread.id)
           if (dismissedPermission) {
-            await runtime.abortActiveRunAndWait({
-              reason: 'user sent a new message while permission was pending',
-            })
+            runtime.abortActiveRun(
+              'user sent a new message while permission was pending',
+            )
           }
           // For text messages: pass the content as the question answer so the
           // model sees the user's response. The early return prevents the message

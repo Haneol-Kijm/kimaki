@@ -44,13 +44,14 @@ import { handleShareCommand } from './commands/share.js'
 import { handleDiffCommand } from './commands/diff.js'
 import { handleForkCommand, handleForkSelectMenu } from './commands/fork.js'
 import { handleBtwCommand } from './commands/btw.js'
+import { handleModelVariantSelectMenu } from './commands/model.js'
 import {
-  handleModelCommand,
-  handleProviderSelectMenu,
-  handleModelSelectMenu,
-  handleModelScopeSelectMenu,
-} from './commands/model.js'
-import { handleUnsetModelCommand } from './commands/unset-model.js'
+  handleCodexModelCommand,
+  handleCodexModelEffortSelectMenu,
+  handleCodexModelScopeSelectMenu,
+  handleCodexModelSelectMenu,
+  handleCodexUnsetModelCommand,
+} from './commands/codex-model.js'
 import {
   handleLoginCommand,
   handleLoginSelect,
@@ -77,6 +78,7 @@ import {
   handleFileUploadModalSubmit,
 } from './commands/file-upload.js'
 import { handleActionButton } from './commands/action-buttons.js'
+import { handleCodexRetryButton } from './commands/codex-retry.js'
 import { handleHtmlActionButton } from './html-actions.js'
 import {
   handleQueueCommand,
@@ -101,7 +103,6 @@ import {
   handleScreenshareCommand,
   handleScreenshareStopCommand,
 } from './commands/screenshare.js'
-import { handleModelVariantSelectMenu } from './commands/model.js'
 import {
   handleModelVariantCommand,
   handleVariantQuickSelectMenu,
@@ -264,7 +265,7 @@ export function registerInteractionHandler({
               return
 
             case 'model':
-              await handleModelCommand({ interaction, appId })
+              await handleCodexModelCommand({ interaction })
               return
 
             case 'model-variant':
@@ -272,7 +273,7 @@ export function registerInteractionHandler({
               return
 
             case 'unset-model-override':
-              await handleUnsetModelCommand({ interaction, appId })
+              await handleCodexUnsetModelCommand({ interaction })
               return
 
             case 'login':
@@ -429,6 +430,11 @@ export function registerInteractionHandler({
             return
           }
 
+          if (customId.startsWith('codex_retry:')) {
+            await handleCodexRetryButton(interaction)
+            return
+          }
+
           if (customId.startsWith('html_action:')) {
             await handleHtmlActionButton(interaction)
             return
@@ -453,18 +459,18 @@ export function registerInteractionHandler({
             return
           }
 
-          if (customId.startsWith('model_provider:')) {
-            await handleProviderSelectMenu(interaction)
+          if (customId.startsWith('codex_model_select:')) {
+            await handleCodexModelSelectMenu(interaction)
             return
           }
 
-          if (customId.startsWith('model_select:')) {
-            await handleModelSelectMenu(interaction)
+          if (customId.startsWith('codex_model_effort:')) {
+            await handleCodexModelEffortSelectMenu(interaction)
             return
           }
 
-          if (customId.startsWith('model_scope:')) {
-            await handleModelScopeSelectMenu(interaction)
+          if (customId.startsWith('codex_model_scope:')) {
+            await handleCodexModelScopeSelectMenu(interaction)
             return
           }
 

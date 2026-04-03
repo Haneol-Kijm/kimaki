@@ -39,6 +39,7 @@ export type QueuedMessage = {
   // Set by --agent/--model/--permission flags on kimaki send or slash commands.
   agent?: string
   model?: string
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
   // Raw permission rule strings ("tool:action" or "tool:pattern:action").
   // Parsed and merged into session permissions on creation.
   permissions?: string[]
@@ -153,6 +154,10 @@ export function removeThread(threadId: string): void {
 
 export function setSessionId(threadId: string, sessionId: string): void {
   updateThread(threadId, (t) => ({ ...t, sessionId }))
+}
+
+export function clearSessionId(threadId: string): void {
+  updateThread(threadId, (t) => ({ ...t, sessionId: undefined }))
 }
 
 export function enqueueItem(threadId: string, item: QueuedMessage): void {

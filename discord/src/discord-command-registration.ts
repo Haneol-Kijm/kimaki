@@ -135,7 +135,7 @@ export async function registerCommands({
   const commands = [
     new SlashCommandBuilder()
       .setName('resume')
-      .setDescription(truncateCommandDescription('Resume an existing OpenCode session'))
+      .setDescription(truncateCommandDescription('Resume an existing Codex session'))
       .addStringOption((option) => {
         option
           .setName('session')
@@ -149,7 +149,7 @@ export async function registerCommands({
       .toJSON(),
     new SlashCommandBuilder()
       .setName('new-session')
-      .setDescription(truncateCommandDescription('Start a new OpenCode session'))
+      .setDescription(truncateCommandDescription('Start a new Codex session'))
       .addStringOption((option) => {
         option
           .setName('prompt')
@@ -339,7 +339,7 @@ export async function registerCommands({
       .toJSON(),
     new SlashCommandBuilder()
       .setName('model')
-      .setDescription(truncateCommandDescription('Set the preferred model for this channel or session'))
+      .setDescription(truncateCommandDescription('Set the Codex model for this channel or thread'))
       .setDMPermission(false)
       .toJSON(),
     new SlashCommandBuilder()
@@ -351,7 +351,7 @@ export async function registerCommands({
       .toJSON(),
     new SlashCommandBuilder()
       .setName('unset-model-override')
-      .setDescription(truncateCommandDescription('Remove model override and use default instead'))
+      .setDescription(truncateCommandDescription('Remove Codex model override and use default instead'))
       .setDMPermission(false)
       .toJSON(),
     new SlashCommandBuilder()
@@ -454,7 +454,7 @@ export async function registerCommands({
     new SlashCommandBuilder()
       .setName('session-id')
       .setDescription(
-        truncateCommandDescription('Show current session ID and opencode attach command for this thread'),
+        truncateCommandDescription('Show current session ID and Codex resume command for this thread'),
       )
       .setDMPermission(false)
       .toJSON(),

@@ -130,6 +130,7 @@ import { notifyError } from '../sentry.js'
 import { createDebouncedProcessFlush } from '../debounced-process-flush.js'
 import { cancelHtmlActionsForThread } from '../html-actions.js'
 import { createDebouncedTimeout } from '../debounce-timeout.js'
+import { CodexThreadRuntime } from './codex-thread-runtime.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 const discordLogger = createLogger(LogPrefix.DISCORD)
@@ -142,20 +143,20 @@ const shouldLogSessionEvents =
 // Runtime instances are kept in a plain Map (not Zustand — the Map
 // is not reactive state, just a lookup for resource handles).
 
-const runtimes = new Map<string, ThreadSessionRuntime>()
+const runtimes = new Map<string, SessionRuntime>()
 
 subscribeOpencodeServerLifecycle((event) => {
   if (event.type !== 'started') {
     return
   }
   for (const runtime of runtimes.values()) {
-    runtime.handleSharedServerStarted({ port: event.port })
+    runtime.handleSharedServerStarted?.({ port: event.port })
   }
 })
 
 export function getRuntime(
   threadId: string,
-): ThreadSessionRuntime | undefined {
+): SessionRuntime | undefined {
   return runtimes.get(threadId)
 }
 
@@ -168,15 +169,38 @@ export type RuntimeOptions = {
   appId?: string
 }
 
+export type SessionRuntime = {
+  readonly threadId: string
+  readonly projectDirectory: string
+  sdkDirectory: string
+  readonly channelId: string | undefined
+  readonly appId: string | undefined
+  readonly thread: ThreadChannel
+  enqueueIncoming(input: IngressInput): Promise<EnqueueResult>
+  abortActiveRun(reason: string): void
+  getQueueLength(): number
+  clearQueue(): void
+  retryLastUserPrompt(options?: {
+    sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
+  }): Promise<boolean>
+  dispose(): void
+  isIdleForInactivityTimeout(opts: { idleMs: number; nowMs?: number }): boolean
+  handleDirectoryChanged?(opts: {
+    oldDirectory: string
+    newDirectory: string
+  }): void
+  handleSharedServerStarted?(opts: { port: number }): void
+}
+
 export function getOrCreateRuntime(
   opts: RuntimeOptions,
-): ThreadSessionRuntime {
+): SessionRuntime {
   const existing = runtimes.get(opts.threadId)
   if (existing) {
     // Reconcile sdkDirectory: worktree threads transition from pending
     // (projectDirectory) to ready (worktree path) after runtime creation.
     if (existing.sdkDirectory !== opts.sdkDirectory) {
-      existing.handleDirectoryChanged({
+      existing.handleDirectoryChanged?.({
         oldDirectory: existing.sdkDirectory,
         newDirectory: opts.sdkDirectory,
       })
@@ -184,7 +208,7 @@ export function getOrCreateRuntime(
     return existing
   }
   threadState.ensureThread(opts.threadId) // add to global store
-  const runtime = new ThreadSessionRuntime(opts)
+  const runtime = new CodexThreadRuntime(opts)
   runtimes.set(opts.threadId, runtime)
   return runtime
 }
@@ -433,6 +457,7 @@ export type IngressInput = {
   // First-dispatch-only overrides (used when creating a new session)
   agent?: string
   model?: string
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access'
   /**
    * Raw permission rule strings from --permission flag ("tool:action" or
    * "tool:pattern:action"). Parsed into PermissionRuleset entries by
