@@ -10,10 +10,13 @@ const DEFAULT_KIMAKI_CODEX_CONFIG = `# Dedicated Codex home for Kimaki Discord s
 # This keeps Discord runs isolated from your main ~/.codex state.
 model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
+service_tier = "fast"
 
-# Codex CLI does not currently expose a standalone "--fast" switch in
-# "codex exec --help". If you want a fast profile later, wire it through a
-# Codex config profile once Kimaki grows explicit profile support.
+[features]
+fast_mode = true
+
+# Codex CLI fast mode is configured via config/profile state, not a standalone
+# "codex exec --fast" flag. This default keeps Kimaki on the fast service tier.
 `
 
 const DEFAULT_DISCORD_PERSONA = `# Kimaki Discord persona
