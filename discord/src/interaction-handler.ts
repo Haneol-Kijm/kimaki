@@ -97,7 +97,7 @@ import { handleRunCommand } from './commands/run-command.js'
 import { handleContextUsageCommand } from './commands/context-usage.js'
 import { handleSessionIdCommand } from './commands/session-id.js'
 
-import { handleUpgradeAndRestartCommand } from './commands/upgrade.js'
+import { handleRestartCommand } from './commands/restart.js'
 import { handleMcpCommand, handleMcpSelectMenu } from './commands/mcp.js'
 import {
   handleScreenshareCommand,
@@ -329,8 +329,8 @@ export function registerInteractionHandler({
 
 
 
-            case 'upgrade-and-restart':
-              await handleUpgradeAndRestartCommand({
+            case 'restart':
+              await handleRestartCommand({
                 command: interaction,
                 appId,
               })

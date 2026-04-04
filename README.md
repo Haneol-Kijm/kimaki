@@ -95,7 +95,7 @@ Both modes work identically after setup. Keep the CLI running — it's the bridg
 | `/redo` | Redo the last undone message |
 | `/screenshare` | Share your screen via VNC tunnel (auto-stops after 1h) |
 | `/screenshare-stop` | Stop screen sharing |
-| `/upgrade-and-restart` | Upgrade kimaki to latest and restart the bot |
+| `/restart` | Restart the running kimaki bot |
 
 Kimaki also registers project-specific slash commands from OpenCode: commands become `/name-cmd`, skills become `/name-skill`, and MCP prompts become `/name-cmd`.
 

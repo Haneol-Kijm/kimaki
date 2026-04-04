@@ -310,7 +310,7 @@ Other Discord bots are ignored by default. To allow another bot to trigger sessi
 ## upgrading kimaki
 
 Use built-in upgrade commands when the user explicitly asks to update kimaki:
-- Discord slash command: "/upgrade-and-restart" upgrades to the latest version and restarts the bot
+- Discord slash command: "/restart" restarts the bot without upgrading
 - CLI command: \`kimaki upgrade\` upgrades and restarts the bot (or starts a fresh process if needed)
 - CLI command: \`kimaki upgrade --skip-restart\` upgrades without restarting
 

@@ -460,9 +460,9 @@ export async function registerCommands({
       .toJSON(),
 
     new SlashCommandBuilder()
-      .setName('upgrade-and-restart')
+      .setName('restart')
       .setDescription(
-        truncateCommandDescription('Upgrade kimaki to the latest version and restart the bot'),
+        truncateCommandDescription('Restart the running kimaki bot'),
       )
       .setDMPermission(false)
       .toJSON(),
