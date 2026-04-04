@@ -27,6 +27,10 @@ import {
   getCurrentCodexModelInfo,
   toCodexCliModel,
 } from '../codex/codex-models.js'
+import {
+  ensureKimakiCodexHomeScaffold,
+  getKimakiCodexHome,
+} from '../codex/codex-home.js'
 import { store } from '../store.js'
 import {
   showCodexRetryButtons,
@@ -530,14 +534,14 @@ export class CodexThreadRuntime implements SessionRuntime {
     this.currentSandboxMode = sandboxMode
 
     const promptText = input.command
-      ? buildCodexPrompt({
+      ? await buildCodexPrompt({
         prompt: `Run the queued slash command /${input.command.name}${input.command.arguments ? ` ${input.command.arguments}` : ''}. Follow the request and report the result clearly.`,
         username: input.username,
         isSlashCommand: true,
         includeCritiqueInstructions: store.getState().critiqueEnabled,
         threadId: this.threadId,
       })
-      : buildCodexPrompt({
+      : await buildCodexPrompt({
         prompt: input.prompt,
         username: input.username,
         includeCritiqueInstructions: store.getState().critiqueEnabled,
@@ -648,13 +652,18 @@ export class CodexThreadRuntime implements SessionRuntime {
         cwd: this.sdkDirectory,
       })
 
+    await ensureKimakiCodexHomeScaffold()
     const codexExecutable = getCodexExecutable()
+    const codexHome = getKimakiCodexHome()
     logger.log(`[CODEX] spawning ${codexExecutable} ${args.join(' ')}`)
 
     const child = spawn(codexExecutable, args, {
       cwd: this.sdkDirectory,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env: {
+        ...process.env,
+        CODEX_HOME: codexHome,
+      },
     })
     this.activeChild = child
 

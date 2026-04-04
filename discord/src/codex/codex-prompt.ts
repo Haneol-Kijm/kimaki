@@ -1,4 +1,6 @@
-export function buildCodexPrompt({
+import { readKimakiDiscordPersona } from './codex-home.js'
+
+export async function buildCodexPrompt({
   prompt,
   username,
   isSlashCommand,
@@ -10,7 +12,8 @@ export function buildCodexPrompt({
   isSlashCommand?: boolean
   includeCritiqueInstructions?: boolean
   threadId?: string
-}): string {
+}): Promise<string> {
+  const personaPrompt = await readKimakiDiscordPersona()
   const header = [
     'You are replying inside a Discord thread that is often read on mobile.',
     'Keep the answer concise, scannable, and directly action-oriented.',
@@ -36,9 +39,13 @@ export function buildCodexPrompt({
   const uploadContext = threadId
     ? `Current Discord thread ID: ${threadId}. If you need to upload files or screenshots back to Discord, run \`kimaki upload-to-discord --thread ${threadId} <paths...>\`.`
     : ''
+  const personaContext = personaPrompt
+    ? `Kimaki Discord persona:\n${personaPrompt}`
+    : ''
 
   return [
     header,
+    personaContext,
     critiqueInstructions,
     userContext,
     commandContext,

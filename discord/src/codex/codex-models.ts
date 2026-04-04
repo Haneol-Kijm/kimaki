@@ -1,7 +1,6 @@
 import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { getChannelModel, getSessionModel } from '../database.js'
+import { getKimakiCodexConfigPath } from './codex-home.js'
 
 export type CodexModelSource = 'session' | 'channel' | 'default'
 
@@ -112,7 +111,7 @@ export function parseCodexConfigHints(content: string): CodexConfigHints {
 }
 
 async function readCodexConfigHints(): Promise<CodexConfigHints> {
-  const configPath = path.join(os.homedir(), '.codex', 'config.toml')
+  const configPath = getKimakiCodexConfigPath()
   const content = await fs.promises.readFile(configPath, 'utf8').catch(() => '')
   if (!content) {
     return {
@@ -127,7 +126,7 @@ function buildModelDescription(
   configHints: CodexConfigHints,
 ): string {
   if (configHints.model === model) {
-    return 'Current model from ~/.codex/config.toml'
+    return 'Current model from the Kimaki Codex config'
   }
   if (configHints.migratedModels.includes(model)) {
     return 'Migration target hinted by Codex config'
