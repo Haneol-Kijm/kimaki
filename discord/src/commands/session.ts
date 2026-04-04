@@ -12,6 +12,8 @@ import { getOrCreateRuntime } from '../session-handler/thread-session-runtime.js
 import { createLogger, LogPrefix } from '../logger.js'
 
 const logger = createLogger(LogPrefix.SESSION)
+const CODEX_AGENT_NOT_SUPPORTED_MESSAGE =
+  'Codex agent profiles are not ported yet. Use /model for now.'
 
 export async function handleSessionCommand({
   command,
@@ -23,6 +25,11 @@ export async function handleSessionCommand({
   const filesString = command.options.getString('files') || ''
   const agent = command.options.getString('agent') || undefined
   const channel = command.channel
+
+  if (agent) {
+    await command.editReply(CODEX_AGENT_NOT_SUPPORTED_MESSAGE)
+    return
+  }
 
   if (!channel || channel.type !== ChannelType.GuildText) {
     await command.editReply('This command can only be used in text channels')
@@ -83,7 +90,6 @@ export async function handleSessionCommand({
       prompt: fullPrompt,
       userId: command.user.id,
       username: command.user.displayName,
-      agent,
       appId,
     })
   } catch (error) {

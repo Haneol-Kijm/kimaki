@@ -2555,6 +2555,13 @@ cli
           }
         }
 
+        if (options.agent) {
+          cliLogger.error(
+            'Codex agent profiles are not ported yet. Use --model for now.',
+          )
+          process.exit(EXIT_NO_RESTART)
+        }
+
         // Initialize database first
         await initDatabase()
 

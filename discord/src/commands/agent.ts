@@ -25,6 +25,8 @@ import { resolveTextChannel, getKimakiMetadata } from '../discord-utils.js'
 import { createLogger, LogPrefix } from '../logger.js'
 
 const agentLogger = createLogger(LogPrefix.AGENT)
+const CODEX_AGENT_NOT_SUPPORTED_MESSAGE =
+  'Codex agent profiles are not ported yet. Use /model for now.'
 
 const AGENT_CONTEXT_TTL_MS = 10 * 60 * 1000
 const pendingAgentContexts = new Map<
@@ -255,92 +257,15 @@ export async function setAgentForContext({
 
 export async function handleAgentCommand({
   interaction,
-  appId,
 }: {
   interaction: ChatInputCommandInteraction
   appId: string
 }): Promise<void> {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral })
 
-  const context = await resolveAgentCommandContext({ interaction, appId })
-  if (!context) {
-    return
-  }
-
-  try {
-    const getClient = await initializeOpencodeForDirectory(context.dir)
-    if (getClient instanceof Error) {
-      await interaction.editReply({ content: getClient.message })
-      return
-    }
-
-    const agentsResponse = await getClient().app.agents({
-      directory: context.dir,
-    })
-
-    if (!agentsResponse.data || agentsResponse.data.length === 0) {
-      await interaction.editReply({ content: 'No agents available' })
-      return
-    }
-
-    const agents = agentsResponse.data
-      .filter((agent) => {
-        const hidden = (agent as { hidden?: boolean }).hidden
-        return (agent.mode === 'primary' || agent.mode === 'all') && !hidden
-      })
-      .slice(0, 25)
-
-    if (agents.length === 0) {
-      await interaction.editReply({ content: 'No primary agents available' })
-      return
-    }
-
-    const currentAgentInfo = await getCurrentAgentInfo({
-      sessionId: context.sessionId,
-      channelId: context.channelId,
-    })
-
-    const currentAgentText = (() => {
-      switch (currentAgentInfo.type) {
-        case 'session':
-          return `**Current (session override):** \`${currentAgentInfo.agent}\``
-        case 'channel':
-          return `**Current (channel override):** \`${currentAgentInfo.agent}\``
-        case 'none':
-          return '**Current:** none'
-      }
-    })()
-
-    const contextHash = crypto.randomBytes(8).toString('hex')
-    pendingAgentContexts.set(contextHash, context)
-    setTimeout(() => {
-      pendingAgentContexts.delete(contextHash)
-    }, AGENT_CONTEXT_TTL_MS).unref()
-
-    const options = agents.map((agent) => ({
-      label: agent.name.slice(0, 100),
-      value: agent.name,
-      description: (agent.description || `${agent.mode} agent`).slice(0, 100),
-    }))
-
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId(`agent_select:${contextHash}`)
-      .setPlaceholder('Select an agent')
-      .addOptions(options)
-
-    const actionRow =
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)
-
-    await interaction.editReply({
-      content: `**Set Agent Preference**\n${currentAgentText}\nSelect an agent:`,
-      components: [actionRow],
-    })
-  } catch (error) {
-    agentLogger.error('Error loading agents:', error)
-    await interaction.editReply({
-      content: `Failed to load agents: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    })
-  }
+  await interaction.editReply({
+    content: CODEX_AGENT_NOT_SUPPORTED_MESSAGE,
+  })
 }
 
 export async function handleAgentSelectMenu(
@@ -410,64 +335,13 @@ export async function handleAgentSelectMenu(
  */
 export async function handleQuickAgentCommand({
   command,
-  appId,
 }: {
   command: ChatInputCommandInteraction
   appId: string
 }): Promise<void> {
-  const fallbackAgentName = command.commandName.replace(/-agent$/, '')
-
   await command.deferReply({ flags: MessageFlags.Ephemeral })
 
-  const context = await resolveAgentCommandContext({
-    interaction: command,
-    appId,
+  await command.editReply({
+    content: CODEX_AGENT_NOT_SUPPORTED_MESSAGE,
   })
-  if (!context) {
-    return
-  }
-
-  try {
-    const resolvedAgentName =
-      (await resolveQuickAgentNameFromInteraction({ command })) ||
-      fallbackAgentName
-
-    // Check current agent and set new one.
-    // getCurrentAgentInfo is fast (DB only), use it for the "was X" text.
-    const previousAgent = await getCurrentAgentInfo({
-      sessionId: context.sessionId,
-      channelId: context.channelId,
-    })
-    const previousAgentName =
-      previousAgent.type !== 'none' ? previousAgent.agent : undefined
-
-    if (previousAgentName === resolvedAgentName) {
-      await command.editReply({
-        content: `Already using **${resolvedAgentName}** agent`,
-      })
-      return
-    }
-
-    // Set the agent preference in DB for this context.
-    await setAgentForContext({ context, agentName: resolvedAgentName })
-
-    const previousText = previousAgentName
-      ? ` (was **${previousAgentName}**)`
-      : ''
-
-    if (context.isThread && context.sessionId) {
-      await command.editReply({
-        content: `Switched to **${resolvedAgentName}** agent for this session next messages${previousText}`,
-      })
-    } else {
-      await command.editReply({
-        content: `Switched to **${resolvedAgentName}** agent for this channel${previousText}\nAll new sessions will use this agent.`,
-      })
-    }
-  } catch (error) {
-    agentLogger.error('Error in quick agent command:', error)
-    await command.editReply({
-      content: `Failed to switch agent: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    })
-  }
 }

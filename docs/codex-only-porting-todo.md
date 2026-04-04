@@ -66,6 +66,8 @@ If revisited later:
 ### Agent Model Surface
 
 - upstream "agent" behavior is mostly tied to OpenCode concepts
+- keep `/agent` and quick `*-agent` commands disabled on the active Codex-only
+  branch until profiles/CODEX_HOME are redefined as native Codex presets
 - do not force a Codex mapping in v1
 - if needed later, redefine "agent" as a preset of prompt/model/reasoning
   behavior instead of copying OpenCode semantics

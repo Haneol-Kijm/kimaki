@@ -1,14 +1,6 @@
-// E2e test for agent model resolution in new threads.
-// Reproduces a bug where /agent channel preference is ignored by the
-// promptAsync path: submitViaOpencodeQueue only passes input.agent/input.model
-// (undefined for normal Discord messages) instead of resolving channel agent
-// preferences from DB like dispatchPrompt does.
-//
-// The test sets a channel agent with a custom model, sends a message,
-// and verifies the footer contains the agent's model — not the default.
-//
-// Uses opencode-deterministic-provider (no real LLM calls).
-// Poll timeouts: 4s max, 100ms interval.
+// E2e reference tests for the legacy OpenCode-backed /agent model surface.
+// Codex-only does not yet port agents as runtime profiles, so keep this file as
+// reference material until Kimaki-native Codex agents land.
 
 import fs from 'node:fs'
 
@@ -177,7 +169,7 @@ function createAgentFile({
   fs.writeFileSync(path.join(agentDir, `${agentName}.md`), content)
 }
 
-describe('agent model resolution', () => {
+describe.skip('agent model resolution', () => {
   let directories: ReturnType<typeof createRunDirectories>
   let discord: DigitalDiscord
   let botClient: Client
