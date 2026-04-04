@@ -44,9 +44,17 @@ const logger = createLogger(LogPrefix.SESSION)
 
 const SANDBOX_DENIAL_RE =
   /operation not permitted|permission denied|sandbox.*(?:block|denied|restrict)|read.only.*file.?system|write access to.*not allowed/i
+const MISSING_CODEX_ROLLOUT_RE =
+  /no rollout found for thread id|thread\/resume failed/i
 
 function getCodexExecutable(): string {
   return process.env['KIMAKI_CODEX_PATH'] || 'codex'
+}
+
+function shouldRestartMissingCodexSession(
+  errorMessage: string | undefined,
+): boolean {
+  return !!errorMessage && MISSING_CODEX_ROLLOUT_RE.test(errorMessage)
 }
 
 type CodexJsonEvent = {
@@ -560,13 +568,25 @@ export class CodexThreadRuntime implements SessionRuntime {
       sandboxMode,
       images: input.images || [],
     })
+    const finalTurnResult =
+      persistedSessionId &&
+      shouldRestartMissingCodexSession(turnResult.errorMessage)
+        ? await this.restartTurnWithFreshCodexSession({
+          promptText,
+          model: cliModel,
+          reasoningEffort,
+          developerInstructions,
+          sandboxMode,
+          images: input.images || [],
+        })
+        : turnResult
 
-    if (turnResult.sessionId) {
-      await this.persistSessionId(turnResult.sessionId)
+    if (finalTurnResult.sessionId) {
+      await this.persistSessionId(finalTurnResult.sessionId)
       if (input.sessionStartScheduleKind) {
         await errore.tryAsync(() => {
           return setSessionStartSource({
-            sessionId: turnResult.sessionId!,
+            sessionId: finalTurnResult.sessionId!,
             scheduleKind: input.sessionStartScheduleKind!,
             scheduledTaskId: input.sessionStartScheduledTaskId,
           })
@@ -577,17 +597,20 @@ export class CodexThreadRuntime implements SessionRuntime {
     this.stopTyping()
     this.lastActivityAt = Date.now()
 
-    if (turnResult.wasAborted) {
+    if (finalTurnResult.wasAborted) {
       logger.log(`[CODEX] run aborted thread=${this.threadId}`)
       return
     }
 
-    if (turnResult.errorMessage) {
-      await sendThreadMessage(this.thread, `Codex error: ${turnResult.errorMessage}`)
+    if (finalTurnResult.errorMessage) {
+      await sendThreadMessage(
+        this.thread,
+        `Codex error: ${finalTurnResult.errorMessage}`,
+      )
       return
     }
 
-    if (turnResult.assistantTexts.length === 0) {
+    if (finalTurnResult.assistantTexts.length === 0) {
       return
     }
 
@@ -601,15 +624,45 @@ export class CodexThreadRuntime implements SessionRuntime {
     )
 
     if (
-      turnResult.sandboxDeniedContext &&
+      finalTurnResult.sandboxDeniedContext &&
       this.currentSandboxMode !== 'danger-full-access'
     ) {
       await showCodexRetryButtons({
         thread: this.thread,
-        context: truncate(turnResult.sandboxDeniedContext, 300),
+        context: truncate(finalTurnResult.sandboxDeniedContext, 300),
         sandboxMode: this.currentSandboxMode,
       })
     }
+  }
+
+  private async restartTurnWithFreshCodexSession({
+    promptText,
+    model,
+    reasoningEffort,
+    developerInstructions,
+    sandboxMode,
+    images,
+  }: {
+    promptText: string
+    model?: string
+    reasoningEffort?: CodexReasoningEffort
+    developerInstructions?: string
+    sandboxMode: CodexSandboxMode
+    images: DiscordFileAttachment[]
+  }): Promise<CodexTurnResult> {
+    logger.log(
+      `[CODEX] missing persisted session for thread=${this.threadId}, starting fresh session`,
+    )
+    await setThreadSession(this.threadId, '')
+    threadState.clearSessionId(this.threadId)
+    return this.executeCodexTurn({
+      promptText,
+      model,
+      reasoningEffort,
+      developerInstructions,
+      sandboxMode,
+      images,
+    })
   }
 
   private async executeCodexTurn({
