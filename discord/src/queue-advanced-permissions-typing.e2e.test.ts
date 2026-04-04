@@ -1,4 +1,7 @@
 // E2e tests for typing indicator behavior around permission prompts.
+// Codex-only currently defaults to approval-free execution and uses sandbox
+// retry buttons instead of OpenCode permission. Keep these tests as reference
+// for a future fallback permission UI, but do not run them on the active port.
 
 import { describe, test, expect } from 'vitest'
 import {
@@ -38,7 +41,7 @@ async function waitForPendingPermission({
   throw new Error('Timed out waiting for pending permission context')
 }
 
-describe('queue advanced: typing around permissions', () => {
+describe.skip('queue advanced: typing around permissions', () => {
   const ctx = setupQueueAdvancedSuite({
     channelId: TEXT_CHANNEL_ID,
     channelName: 'qa-permission-typing-e2e',

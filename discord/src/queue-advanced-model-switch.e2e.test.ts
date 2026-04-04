@@ -1,6 +1,9 @@
 // E2e test for /model switch behavior through interrupt recovery.
 // Reproduces fallback where interrupt plugin resume can run without model,
 // causing default opencode.json model to be used after switching session model.
+// Codex-only uses a different model command surface and does not expose the
+// OpenCode provider/model/variant selector this test drives. Keep as reference
+// until Codex model-switch e2e coverage replaces it.
 
 import { describe, test, expect } from 'vitest'
 import fs from 'node:fs'
@@ -102,7 +105,7 @@ async function waitForInteractionMessage({
   throw new Error(`Timed out waiting for interaction message ${interactionId}`)
 }
 
-describe('queue advanced: /model with interrupt recovery', () => {
+describe.skip('queue advanced: /model with interrupt recovery', () => {
   const ctx = setupQueueAdvancedSuite({
     channelId: TEXT_CHANNEL_ID,
     channelName: 'qa-model-switch-e2e',

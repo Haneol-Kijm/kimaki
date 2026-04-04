@@ -79,6 +79,11 @@ type CodexTurnResult = {
   wasAborted: boolean
 }
 
+type ResolvedIngressInput = {
+  queuedMessage: QueuedMessage
+  mode: 'opencode' | 'local-queue'
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
@@ -272,9 +277,10 @@ export class CodexThreadRuntime implements SessionRuntime {
 
   private async resolvePreprocessedInput(
     input: IngressInput,
-  ): Promise<QueuedMessage | undefined> {
+  ): Promise<ResolvedIngressInput | undefined> {
     let resolvedPrompt = input.prompt
     let resolvedImages = input.images
+    let resolvedMode = input.mode || 'opencode'
 
     if (input.preprocess) {
       const preprocessed = await input.preprocess()
@@ -283,36 +289,60 @@ export class CodexThreadRuntime implements SessionRuntime {
       }
       resolvedPrompt = preprocessed.prompt
       resolvedImages = preprocessed.images
+      resolvedMode = preprocessed.mode
     }
 
     return {
-      prompt: resolvedPrompt,
-      userId: input.userId,
-      username: input.username,
-      images: resolvedImages,
-      appId: input.appId,
-      command: input.command,
-      agent: input.agent,
-      model: input.model,
-      sessionStartScheduleKind: input.sessionStartSource?.scheduleKind,
-      sessionStartScheduledTaskId: input.sessionStartSource?.scheduledTaskId,
-      sandboxMode: input.sandboxMode,
+      mode: resolvedMode,
+      queuedMessage: {
+        prompt: resolvedPrompt,
+        userId: input.userId,
+        username: input.username,
+        images: resolvedImages,
+        appId: input.appId,
+        command: input.command,
+        agent: input.agent,
+        model: input.model,
+        sessionStartScheduleKind: input.sessionStartSource?.scheduleKind,
+        sessionStartScheduledTaskId: input.sessionStartSource?.scheduledTaskId,
+        sandboxMode: input.sandboxMode,
+      },
     }
   }
 
   private async enqueueResolvedInput(
-    queuedInput: QueuedMessage,
+    resolvedInput: ResolvedIngressInput,
   ): Promise<EnqueueResult> {
     if (this.disposed) {
       return { queued: false }
     }
 
-    const hadPendingWork = this.hasPendingOrActiveWork()
+    const { queuedMessage, mode } = resolvedInput
+    const hasActiveTurn = Boolean(this.activeChild) || Boolean(this.activeTurnPromise)
+    const hasQueuedItems = (this.state?.queueItems.length ?? 0) > 0
+    const hadPendingWork = hasActiveTurn || hasQueuedItems
     if (this.blockedAfterAbort) {
       this.blockedAfterAbort = false
     }
 
-    threadState.enqueueItem(this.threadId, queuedInput)
+    if (mode !== 'local-queue' && hadPendingWork) {
+      if (hasActiveTurn) {
+        this.interruptForIncomingMessage()
+      }
+      threadState.updateThread(this.threadId, (thread) => ({
+        ...thread,
+        queueItems: [queuedMessage, ...thread.queueItems],
+      }))
+      if (!this.activeTurnPromise) {
+        this.startDrainLoop()
+      }
+      return { queued: false }
+    }
+
+    threadState.enqueueItem(this.threadId, {
+      ...queuedMessage,
+      showIndicatorOnDispatch: mode === 'local-queue' && hadPendingWork,
+    })
     const position = this.state?.queueItems.length
 
     if (!hadPendingWork) {
@@ -330,12 +360,12 @@ export class CodexThreadRuntime implements SessionRuntime {
     return new Promise((resolve, reject) => {
       const run = async () => {
         try {
-          const queuedInput = await this.resolvePreprocessedInput(input)
-          if (!queuedInput) {
+          const resolvedInput = await this.resolvePreprocessedInput(input)
+          if (!resolvedInput) {
             resolve({ queued: false })
             return
           }
-          resolve(await this.enqueueResolvedInput(queuedInput))
+          resolve(await this.enqueueResolvedInput(resolvedInput))
         } catch (error) {
           reject(error)
         }
@@ -370,6 +400,27 @@ export class CodexThreadRuntime implements SessionRuntime {
     }
   }
 
+  private interruptForIncomingMessage(): void {
+    logger.log(`[CODEX] interrupting active run for new incoming message thread=${this.threadId}`)
+    this.stopTyping()
+
+    const activeRunId = this.activeRunId
+    if (activeRunId > 0) {
+      this.abortedRunId = activeRunId
+    }
+
+    if (!this.activeChild || this.activeChild.killed) {
+      return
+    }
+
+    this.activeChild.kill('SIGTERM')
+    setTimeout(() => {
+      if (this.activeChild && !this.activeChild.killed) {
+        this.activeChild.kill('SIGKILL')
+      }
+    }, 750).unref()
+  }
+
   getQueueLength(): number {
     return this.state?.queueItems.length ?? 0
   }
@@ -388,6 +439,17 @@ export class CodexThreadRuntime implements SessionRuntime {
         const next = threadState.dequeueItem(this.threadId)
         if (!next) {
           break
+        }
+        if (next.showIndicatorOnDispatch) {
+          const displayText = next.command
+            ? `/${next.command.name}`
+            : `${next.prompt.slice(0, 150)}${next.prompt.length > 150 ? '...' : ''}`
+          if (displayText.trim()) {
+            await sendThreadMessage(
+              this.thread,
+              `» **${next.username}:** ${displayText}`,
+            )
+          }
         }
         await this.runTurn(next)
         if (this.blockedAfterAbort) {
@@ -802,9 +864,12 @@ export class CodexThreadRuntime implements SessionRuntime {
     this.blockedAfterAbort = false
 
     await this.enqueueResolvedInput({
-      ...this.lastTurnInput,
-      images: this.lastTurnInput.images ? [...this.lastTurnInput.images] : undefined,
-      sandboxMode: sandboxMode || this.lastTurnInput.sandboxMode,
+      mode: 'opencode',
+      queuedMessage: {
+        ...this.lastTurnInput,
+        images: this.lastTurnInput.images ? [...this.lastTurnInput.images] : undefined,
+        sandboxMode: sandboxMode || this.lastTurnInput.sandboxMode,
+      },
     })
     return true
   }

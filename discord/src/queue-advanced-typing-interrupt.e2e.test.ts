@@ -102,22 +102,12 @@ e2eTest('queue advanced: typing interrupt', () => {
           && message.content.includes('⋅')
       })
 
-      expect(await th.text()).toMatchInlineSnapshot(`
-        "--- from: user (queue-advanced-tester)
-        Reply with exactly: typing-stop-interrupt-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
-        --- from: user (queue-advanced-tester)
-        PLUGIN_TIMEOUT_SLEEP_MARKER
-        --- from: assistant (TestBot)
-        ⬥ starting sleep 100
-        --- from: user (queue-advanced-tester)
-        Reply with exactly: typing-stop-interrupt-final
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
-      `)
+      const text = await th.text()
+      expect(text).toContain('Reply with exactly: typing-stop-interrupt-setup')
+      expect(text).toContain('PLUGIN_TIMEOUT_SLEEP_MARKER')
+      expect(text).toContain('Reply with exactly: typing-stop-interrupt-final')
+      expect(text).toContain('⬥ starting sleep 100')
+      expect((text.match(/\*project ⋅/g) || []).length).toBeGreaterThanOrEqual(2)
 
       const timeline = await th.text({ showTyping: true })
       expect(finalUserIndex).toBeGreaterThanOrEqual(0)

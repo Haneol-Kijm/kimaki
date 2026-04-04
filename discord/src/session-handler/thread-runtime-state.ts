@@ -57,6 +57,10 @@ export type QueuedMessage = {
   // list can show which sessions were started by scheduled tasks.
   sessionStartScheduleKind?: 'at' | 'cron'
   sessionStartScheduledTaskId?: number
+  // When true, the runtime emits a visible `» username: prompt` indicator
+  // before dispatching this queued item. Used for items that truly waited
+  // behind earlier work, like explicit /queue entries.
+  showIndicatorOnDispatch?: boolean
 }
 
 // ── Per-thread state (value inside the Map) ──────────────────────
