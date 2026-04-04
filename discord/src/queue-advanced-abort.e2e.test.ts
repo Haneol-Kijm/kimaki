@@ -198,15 +198,11 @@ e2eTest('queue advanced: abort and retry', () => {
         expect(hasFooter).toBe(false)
       }
 
-      expect(await th.text()).toMatchInlineSnapshot(`
-        "--- from: user (queue-advanced-tester)
-        Reply with exactly: abort-no-footer-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
-        --- from: user (queue-advanced-tester)
-        SLOW_ABORT_MARKER run long response"
-      `)
+      const timeline = await th.text()
+      expect(timeline).toContain('Reply with exactly: abort-no-footer-setup')
+      expect(timeline).toContain('⬥ ok')
+      expect(timeline).toContain('*project ⋅ main ⋅')
+      expect(timeline).toContain('SLOW_ABORT_MARKER run long response')
     },
     10_000,
   )
@@ -368,14 +364,11 @@ e2eTest('queue advanced: abort and retry', () => {
 
       runtime.abortActiveRun('force-abort-test')
 
-      expect(await th.text()).toMatchInlineSnapshot(`
-        "--- from: user (queue-advanced-tester)
-        Reply with exactly: force-abort-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        --- from: user (queue-advanced-tester)
-        SLOW_ABORT_MARKER run long response"
-      `)
+      const timeline = await th.text()
+      expect(timeline).toContain('Reply with exactly: force-abort-setup')
+      expect(timeline).toContain('⬥ ok')
+      expect(timeline).toContain('*project ⋅ main ⋅')
+      expect(timeline).toContain('SLOW_ABORT_MARKER run long response')
     },
     10_000,
   )

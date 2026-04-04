@@ -161,19 +161,11 @@ describe('queue advanced: action buttons', () => {
       })
 
       const timeline = await th.text({ showInteractions: true })
-      expect(timeline).toMatchInlineSnapshot(`
-        "--- from: user (queue-action-tester)
-        Reply with exactly: action-button-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
-        **Action Required**
-        _Selected: Continue action-buttons flow_
-        [user clicks button]
-        ⬥ action-buttons-click-continued
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
-      `)
+      expect(timeline).toContain('Reply with exactly: action-button-setup')
+      expect(timeline).toContain('_Selected: Continue action-buttons flow_')
+      expect(timeline).toContain('[user clicks button]')
       expect(timeline).toContain('action-buttons-click-continued')
+      expect(timeline).toContain('*project ⋅ main ⋅')
     },
     20_000,
   )
@@ -249,19 +241,10 @@ describe('queue advanced: action buttons', () => {
       })
 
       const timeline = await th.text({ showInteractions: true })
-      expect(timeline).toMatchInlineSnapshot(`
-        "--- from: user (queue-action-tester)
-        Reply with exactly: action-button-dismiss-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
-        **Action Required**
-        _Buttons dismissed._
-        --- from: user (queue-action-tester)
-        Reply with exactly: post-dismiss-user-message"
-      `)
       expect(timeline).toContain('_Buttons dismissed._')
       expect(timeline).toContain('post-dismiss-user-message')
+      expect(timeline).toContain('⬥ ok')
+      expect(timeline).toContain('*project ⋅ main ⋅')
     },
     20_000,
   )

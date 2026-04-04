@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ThreadChannel } from 'discord.js'
+import prettyMilliseconds from 'pretty-ms'
 import * as errore from 'errore'
 import * as threadState from './thread-runtime-state.js'
 import type { QueuedMessage } from './thread-runtime-state.js'
@@ -32,11 +33,16 @@ import {
   type CodexSandboxMode,
 } from '../codex/retry-controls.js'
 import { buildCodexPrompt } from '../codex/codex-prompt.js'
+import { execAsync } from '../worktrees.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 
 const SANDBOX_DENIAL_RE =
   /operation not permitted|permission denied|sandbox.*(?:block|denied|restrict)|read.only.*file.?system|write access to.*not allowed/i
+
+function getCodexExecutable(): string {
+  return process.env['KIMAKI_CODEX_PATH'] || 'codex'
+}
 
 type CodexJsonEvent = {
   type?: string
@@ -406,7 +412,37 @@ export class CodexThreadRuntime implements SessionRuntime {
     threadState.setSessionId(this.threadId, sessionId)
   }
 
+  private async getFooterText({
+    startedAt,
+    modelId,
+  }: {
+    startedAt: number
+    modelId: string
+  }): Promise<string> {
+    const folderName = path.basename(this.sdkDirectory)
+    const branchResult = await errore.tryAsync(() => {
+      return execAsync('git symbolic-ref --short HEAD', {
+        cwd: this.sdkDirectory,
+      })
+    })
+    const branchName =
+      branchResult instanceof Error ? undefined : branchResult.stdout.trim() || undefined
+    const duration = prettyMilliseconds(Math.max(0, Date.now() - startedAt), {
+      secondsDecimalDigits: 0,
+    })
+    const footerParts = [folderName]
+    if (branchName) {
+      footerParts.push(branchName)
+    }
+    footerParts.push(duration, 'codex')
+    if (modelId !== CODEX_DEFAULT_MODEL_ID) {
+      footerParts.push(modelId.replace(/^codex\//, ''))
+    }
+    return `*${footerParts.join(' ⋅ ')}*`
+  }
+
   private async runTurn(input: QueuedMessage): Promise<void> {
+    const startedAt = Date.now()
     this.lastActivityAt = Date.now()
     this.lastTurnInput = {
       ...input,
@@ -486,13 +522,12 @@ export class CodexThreadRuntime implements SessionRuntime {
       return
     }
 
-    const footerParts = [path.basename(this.sdkDirectory), 'codex']
-    if (currentModel !== CODEX_DEFAULT_MODEL_ID) {
-      footerParts.push(currentModel.replace(/^codex\//, ''))
-    }
     await sendThreadMessage(
       this.thread,
-      `*${footerParts.join(' | ')}*`,
+      await this.getFooterText({
+        startedAt,
+        modelId: currentModel,
+      }),
       { flags: NOTIFY_MESSAGE_FLAGS },
     )
 
@@ -550,9 +585,10 @@ export class CodexThreadRuntime implements SessionRuntime {
         cwd: this.sdkDirectory,
       })
 
-    logger.log(`[CODEX] spawning codex ${args.join(' ')}`)
+    const codexExecutable = getCodexExecutable()
+    logger.log(`[CODEX] spawning ${codexExecutable} ${args.join(' ')}`)
 
-    const child = spawn('codex', args, {
+    const child = spawn(codexExecutable, args, {
       cwd: this.sdkDirectory,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: process.env,
@@ -912,7 +948,7 @@ export function formatCodexAssistantText(text: string): string | undefined {
     return `\n${trimmed}`
   }
 
-  return `- ${trimmed}`
+  return `⬥ ${trimmed}`
 }
 
 function normalizeCommand(command: string): string {

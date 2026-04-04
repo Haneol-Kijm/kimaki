@@ -128,6 +128,11 @@ describe('kimaki send --channel thread creation', () => {
     const lockPort = chooseLockPort({ key: TEXT_CHANNEL_ID })
 
     process.env['KIMAKI_LOCK_PORT'] = String(lockPort)
+    process.env['KIMAKI_CODEX_PATH'] = path.resolve(
+      process.cwd(),
+      'scripts',
+      'mock-codex-cli.js',
+    )
     setDataDir(directories.dataDir)
     previousDefaultVerbosity = store.getState().defaultVerbosity
     store.setState({ defaultVerbosity: 'tools_and_text' })
@@ -248,6 +253,7 @@ describe('kimaki send --channel thread creation', () => {
       }),
     ])
     delete process.env['KIMAKI_LOCK_PORT']
+    delete process.env['KIMAKI_CODEX_PATH']
     delete process.env['KIMAKI_DB_URL']
     if (previousDefaultVerbosity) {
       store.setState({ defaultVerbosity: previousDefaultVerbosity })

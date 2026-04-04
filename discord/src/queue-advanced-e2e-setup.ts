@@ -757,6 +757,11 @@ export function setupQueueAdvancedSuite({
     process.env['KIMAKI_INTERRUPT_STEP_TIMEOUT_MS'] = '500'
     process.env['KIMAKI_LOG_OPENCODE_SESSION_EVENTS'] = '1'
     process.env['KIMAKI_OPENCODE_SESSION_EVENTS_DIR'] = sessionEventsDir
+    process.env['KIMAKI_CODEX_PATH'] = path.resolve(
+      process.cwd(),
+      'scripts',
+      'mock-codex-cli.js',
+    )
     setDataDir(ctx.directories.dataDir)
     previousDefaultVerbosity = store.getState().defaultVerbosity
     store.setState({ defaultVerbosity: 'tools_and_text' })
@@ -850,6 +855,7 @@ export function setupQueueAdvancedSuite({
     delete process.env['KIMAKI_INTERRUPT_STEP_TIMEOUT_MS']
     delete process.env['KIMAKI_LOG_OPENCODE_SESSION_EVENTS']
     delete process.env['KIMAKI_OPENCODE_SESSION_EVENTS_DIR']
+    delete process.env['KIMAKI_CODEX_PATH']
     if (previousDefaultVerbosity) {
       store.setState({ defaultVerbosity: previousDefaultVerbosity })
     }

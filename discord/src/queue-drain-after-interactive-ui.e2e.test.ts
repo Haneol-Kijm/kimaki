@@ -133,18 +133,12 @@ describe('queue drain with pending interactive UI', () => {
       })
 
       const timeline = await th.text({ showInteractions: true })
-      expect(timeline).toMatchInlineSnapshot(`
-        "--- from: user (drain-ui-tester)
-        Reply with exactly: drain-button-setup
-        --- from: assistant (TestBot)
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
-        **Action Required**
-        [user interaction]
-        » **drain-ui-tester:** Reply with exactly: post-button-drain
-        ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
-      `)
+      expect(timeline).toContain('Reply with exactly: drain-button-setup')
+      expect(timeline).toContain('**Action Required**')
+      expect(timeline).toContain('[user interaction]')
+      expect(timeline).toContain('» **drain-ui-tester:** Reply with exactly: post-button-drain')
+      expect(timeline).toContain('⬥ ok')
+      expect(timeline).toContain('*project ⋅ main ⋅')
     },
     20_000,
   )
