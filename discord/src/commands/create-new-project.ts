@@ -173,7 +173,7 @@ export async function handleCreateNewProjectCommand({
     })
     await runtime.enqueueIncoming({
       prompt:
-        'The project was just initialized. Say hi and ask what the user wants to build.',
+        "The project was just initialized. Reply in the user's language, say hi briefly, and ask what they want to build.",
       userId: command.user.id,
       username: command.user.displayName,
       appId,

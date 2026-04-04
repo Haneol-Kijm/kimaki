@@ -61,6 +61,11 @@ type CodexJsonEvent = {
   type?: string
   thread_id?: string
   message?: string
+  usage?: {
+    input_tokens?: number
+    cached_input_tokens?: number
+    output_tokens?: number
+  }
   item?: {
     id?: string
     type?: string
@@ -84,12 +89,19 @@ type CompletedCommand = {
   exitCode: number
 }
 
+type CodexTurnUsage = {
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+}
+
 type CodexTurnResult = {
   sessionId?: string
   assistantTexts: string[]
   errorMessage?: string
   sandboxDeniedContext?: string
   wasAborted: boolean
+  usage?: CodexTurnUsage
 }
 
 type ResolvedIngressInput = {
@@ -108,6 +120,17 @@ function truncate(text: string, maxChars: number): string {
     return text
   }
   return `${text.slice(0, maxChars - 1)}...`
+}
+
+function formatCompactTokenCount(tokens: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(tokens)
+}
+
+function getContextTokenCount(usage: CodexTurnUsage): number {
+  return usage.inputTokens + usage.cachedInputTokens
 }
 
 function escapeInlineMarkdown(text: string): string {
@@ -490,9 +513,11 @@ export class CodexThreadRuntime implements SessionRuntime {
   private async getFooterText({
     startedAt,
     modelId,
+    usage,
   }: {
     startedAt: number
     modelId: string
+    usage?: CodexTurnUsage
   }): Promise<string> {
     const folderName = path.basename(this.sdkDirectory)
     const branchResult = await errore.tryAsync(() => {
@@ -512,6 +537,12 @@ export class CodexThreadRuntime implements SessionRuntime {
     footerParts.push(duration, 'codex')
     if (modelId !== CODEX_DEFAULT_MODEL_ID) {
       footerParts.push(modelId.replace(/^codex\//, ''))
+    }
+    if (usage) {
+      const contextTokens = getContextTokenCount(usage)
+      if (contextTokens > 0) {
+        footerParts.push(`${formatCompactTokenCount(contextTokens)} ctx`)
+      }
     }
     return `*${footerParts.join(' ⋅ ')}*`
   }
@@ -614,14 +645,15 @@ export class CodexThreadRuntime implements SessionRuntime {
       return
     }
 
-    await sendThreadMessage(
-      this.thread,
-      await this.getFooterText({
-        startedAt,
-        modelId: currentModel,
-      }),
-      { flags: NOTIFY_MESSAGE_FLAGS },
-    )
+      await sendThreadMessage(
+        this.thread,
+        await this.getFooterText({
+          startedAt,
+          modelId: currentModel,
+          usage: finalTurnResult.usage,
+        }),
+        { flags: NOTIFY_MESSAGE_FLAGS },
+      )
 
     if (
       finalTurnResult.sandboxDeniedContext &&
@@ -731,6 +763,7 @@ export class CodexThreadRuntime implements SessionRuntime {
     let nextSessionId = sessionId
     let errorMessage: string | undefined
     let sandboxDeniedContext: string | undefined
+    let usage: CodexTurnUsage | undefined
     const startedCommandIds = new Set<string>()
     let renderChain = Promise.resolve()
 
@@ -847,6 +880,15 @@ export class CodexThreadRuntime implements SessionRuntime {
         return
       }
 
+      if (parsed.type === 'turn.completed' && parsed.usage) {
+        usage = {
+          inputTokens: parsed.usage.input_tokens ?? 0,
+          cachedInputTokens: parsed.usage.cached_input_tokens ?? 0,
+          outputTokens: parsed.usage.output_tokens ?? 0,
+        }
+        return
+      }
+
       if (parsed.type === 'turn.failed') {
         errorMessage = parsed.error?.message || 'Codex turn failed'
       }
@@ -906,6 +948,7 @@ export class CodexThreadRuntime implements SessionRuntime {
       errorMessage,
       sandboxDeniedContext,
       wasAborted,
+      usage,
     }
   }
 

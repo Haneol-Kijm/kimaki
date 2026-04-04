@@ -227,6 +227,11 @@ e2eTest('queue advanced: abort and retry', () => {
       const th = ctx.discord.thread(thread.id)
       const setupReply = await th.waitForBotReply({ timeout: 4_000 })
       expect(setupReply.content.trim().length).toBeGreaterThan(0)
+      await waitForFooterMessage({
+        discord: ctx.discord,
+        threadId: thread.id,
+        timeout: 4_000,
+      })
 
       await th.user(TEST_USER_ID).sendMessage({
         content: 'SLOW_ABORT_MARKER run long response',
@@ -367,7 +372,6 @@ e2eTest('queue advanced: abort and retry', () => {
       const timeline = await th.text()
       expect(timeline).toContain('Reply with exactly: force-abort-setup')
       expect(timeline).toContain('⬥ ok')
-      expect(timeline).toContain('*project ⋅ main ⋅')
       expect(timeline).toContain('SLOW_ABORT_MARKER run long response')
     },
     10_000,

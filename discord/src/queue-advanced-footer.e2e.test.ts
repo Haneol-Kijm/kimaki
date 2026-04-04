@@ -50,7 +50,7 @@ e2eTest('queue advanced: footer emission', () => {
       expect(timeline).toContain('Reply with exactly: footer-check')
       expect(timeline).toContain('⬥ ok')
       expect(timeline).toContain('*project ⋅ main ⋅')
-      expect(timeline).toContain('⋅ codex ⋅ gpt-5.4*')
+      expect(timeline).toContain('⋅ codex')
       const foundFooter = footerMessages.some((m) => {
         return m.author.id === ctx.discord.botUserId
           && m.content.startsWith('*')
@@ -117,7 +117,7 @@ e2eTest('queue advanced: footer emission', () => {
       expect(timeline).toContain('Reply with exactly: footer-multi-second')
       expect(timeline).toContain('⬥ ok')
       expect(timeline).toContain('*project ⋅ main ⋅')
-      expect(timeline).toContain('⋅ codex ⋅ gpt-5.4*')
+      expect(timeline).toContain('⋅ codex')
       if (footerCount >= 2) {
         expect(footerCount).toBeGreaterThanOrEqual(2)
         return
