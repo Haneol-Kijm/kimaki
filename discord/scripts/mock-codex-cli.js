@@ -68,6 +68,18 @@ async function main() {
     return
   }
 
+  if (prompt.includes('TYPING_REPULSE_MARKER')) {
+    writeEvent({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: 'repulse-first',
+      },
+    })
+    await sleep(1_800)
+    return
+  }
+
   if (prompt.includes('User clicked: Continue action-buttons flow')) {
     writeEvent({
       type: 'item.completed',
