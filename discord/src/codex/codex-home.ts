@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import * as errore from 'errore'
 import { getDataDir } from '../config.js'
@@ -40,6 +41,10 @@ export function getKimakiCodexPersonaDir(): string {
   return path.join(getKimakiCodexHome(), 'personas')
 }
 
+export function getKimakiCodexAuthPath(): string {
+  return path.join(getKimakiCodexHome(), 'auth.json')
+}
+
 export function getKimakiDiscordPersonaPath(): string {
   return path.join(getKimakiCodexPersonaDir(), 'discord.md')
 }
@@ -48,7 +53,9 @@ export async function ensureKimakiCodexHomeScaffold(): Promise<void> {
   const codexHome = getKimakiCodexHome()
   const personaDir = getKimakiCodexPersonaDir()
   const configPath = getKimakiCodexConfigPath()
+  const authPath = getKimakiCodexAuthPath()
   const personaPath = getKimakiDiscordPersonaPath()
+  const defaultAuthPath = path.join(os.homedir(), '.codex', 'auth.json')
 
   const mkdirHome = await errore.tryAsync(() => {
     return fs.promises.mkdir(codexHome, { recursive: true })
@@ -86,6 +93,18 @@ export async function ensureKimakiCodexHomeScaffold(): Promise<void> {
     if (writePersona instanceof Error) {
       logger.warn(
         `[CODEX] failed to write default persona ${personaPath}: ${writePersona.message}`,
+      )
+    }
+  }
+
+  if (!fs.existsSync(authPath) && fs.existsSync(defaultAuthPath)) {
+    const copyAuth = await errore.tryAsync(async () => {
+      await fs.promises.copyFile(defaultAuthPath, authPath)
+      await fs.promises.chmod(authPath, 0o600)
+    })
+    if (copyAuth instanceof Error) {
+      logger.warn(
+        `[CODEX] failed to copy auth bootstrap ${defaultAuthPath} -> ${authPath}: ${copyAuth.message}`,
       )
     }
   }
