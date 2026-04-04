@@ -20,6 +20,7 @@ OpenCode and gateway code present but out of the critical path.
 - Codex session lifecycle commands for new session, resume, and session id
 - Codex model command surface
 - Codex retry and upload guidance in prompt/CLI
+- Codex sandbox retry fallback with escalation coverage for restricted modes
 - Test stabilization for core thread queue flows using a mock Codex CLI
 
 ## Next Priority

@@ -600,6 +600,7 @@ export class CodexThreadRuntime implements SessionRuntime {
       await showCodexRetryButtons({
         thread: this.thread,
         context: truncate(turnResult.sandboxDeniedContext, 300),
+        sandboxMode: this.currentSandboxMode,
       })
     }
   }

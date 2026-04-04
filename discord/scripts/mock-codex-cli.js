@@ -19,14 +19,24 @@ function parseInvocation(argv) {
   const sessionId =
     isResume && promptIndex > 0 ? argv[promptIndex - 1] : undefined
 
+  let sandboxMode = 'workspace-write'
+  const sandboxIndex = argv.indexOf('--sandbox')
+  if (sandboxIndex >= 0 && argv[sandboxIndex + 1]) {
+    sandboxMode = argv[sandboxIndex + 1]
+  }
+  if (argv.includes('--dangerously-bypass-approvals-and-sandbox')) {
+    sandboxMode = 'danger-full-access'
+  }
+
   return {
     prompt,
     sessionId,
+    sandboxMode,
   }
 }
 
 async function main() {
-  const { prompt, sessionId } = parseInvocation(process.argv.slice(2))
+  const { prompt, sessionId, sandboxMode } = parseInvocation(process.argv.slice(2))
   const threadId = sessionId || `mock-session-${process.pid}`
 
   writeEvent({
@@ -64,6 +74,28 @@ async function main() {
       item: {
         type: 'agent_message',
         text: 'action-buttons-click-continued',
+      },
+    })
+    return
+  }
+
+  if (prompt.includes('CODEX_SANDBOX_RETRY_MARKER')) {
+    if (sandboxMode === 'read-only') {
+      writeEvent({
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: 'I hit a sandbox restriction. Permission denied while running in read-only mode.',
+        },
+      })
+      return
+    }
+
+    writeEvent({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: 'sandbox-retry-done',
       },
     })
     return

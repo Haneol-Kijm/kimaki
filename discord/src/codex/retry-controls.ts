@@ -39,14 +39,27 @@ export function parseCodexRetryCustomId(
 export async function showCodexRetryButtons({
   thread,
   context,
+  sandboxMode,
 }: {
   thread: ThreadChannel
   context: string
+  sandboxMode: CodexSandboxMode
 }): Promise<void> {
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row = new ActionRowBuilder<ButtonBuilder>()
+
+  if (sandboxMode === 'read-only') {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(buildCodexRetryCustomId('workspace-write'))
+        .setLabel('Retry with workspace-write')
+        .setStyle(ButtonStyle.Primary),
+    )
+  }
+
+  row.addComponents(
     new ButtonBuilder()
       .setCustomId(buildCodexRetryCustomId('danger-full-access'))
-      .setLabel('Retry')
+      .setLabel('Retry with full access')
       .setStyle(ButtonStyle.Danger),
     new ButtonBuilder()
       .setCustomId(buildCodexRetryCustomId('cancel'))
@@ -55,7 +68,10 @@ export async function showCodexRetryButtons({
   )
 
   await thread.send({
-    content: `Codex hit a sandbox restriction.\n${context}\nRetry the last prompt with full access?`,
+    content:
+      `Codex hit a sandbox restriction while running with \`${sandboxMode}\`.\n` +
+      `${context}\n` +
+      'Choose how to retry the last prompt.',
     components: [row],
   })
 }
