@@ -1,5 +1,7 @@
-// E2e tests for basic per-thread message queue ordering.
-// Advanced interrupt/abort/retry tests are in thread-queue-advanced.e2e.test.ts.
+// Reference-only E2e coverage for the legacy OpenCode queue harness.
+// Active Codex-only queue coverage lives in the split queue-advanced files and
+// cli-send-thread. Rewrite this file around the mock Codex CLI before
+// re-enabling it.
 //
 // Uses opencode-deterministic-provider which returns canned responses instantly
 // (no real LLM calls), so poll timeouts can be aggressive (4s). The only real
@@ -48,7 +50,7 @@ import {
 } from './test-utils.js'
 
 
-const e2eTest = describe
+const e2eTest = describe.skip
 
 function createRunDirectories() {
   const root = path.resolve(process.cwd(), 'tmp', 'thread-queue-e2e')

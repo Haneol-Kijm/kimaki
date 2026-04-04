@@ -133,6 +133,15 @@ function createDeterministicMatchers(): DeterministicMatcher[] {
   return [highUsageReplyMatcher, userReplyMatcher]
 }
 
+function normalizeCodexTimeline(text: string): string {
+  return text
+    .replace(/\b\d+(?:\.\d+)?(?:ms|s|m)\b/g, 'Ns')
+    .replace(
+      /\*project ⋅ main ⋅ Ns ⋅ codex(?: ⋅ [^*\n]+)?\*/g,
+      '*project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*',
+    )
+}
+
 describe('runtime lifecycle', () => {
   let directories: ReturnType<typeof createRunDirectories>
   let discord: DigitalDiscord
@@ -146,6 +155,11 @@ describe('runtime lifecycle', () => {
     const lockPort = chooseLockPort({ key: TEXT_CHANNEL_ID })
 
     process.env['KIMAKI_LOCK_PORT'] = String(lockPort)
+    process.env['KIMAKI_CODEX_PATH'] = path.resolve(
+      process.cwd(),
+      'scripts',
+      'mock-codex-cli.js',
+    )
     setDataDir(directories.dataDir)
     previousDefaultVerbosity = store.getState().defaultVerbosity
     store.setState({ defaultVerbosity: 'tools_and_text' })
@@ -254,6 +268,7 @@ describe('runtime lifecycle', () => {
       discord?.stop().catch(() => { return }),
     ])
     delete process.env['KIMAKI_LOCK_PORT']
+    delete process.env['KIMAKI_CODEX_PATH']
     delete process.env['KIMAKI_DB_URL']
     if (previousDefaultVerbosity) {
       store.setState({ defaultVerbosity: previousDefaultVerbosity })
@@ -349,22 +364,22 @@ describe('runtime lifecycle', () => {
 
       // Still the same runtime — three full cycles, one runtime, one listener
       const runtimeAfterC = getRuntime(thread.id)
-      expect(await th.text()).toMatchInlineSnapshot(`
+      expect(normalizeCodexTimeline(await th.text())).toMatchInlineSnapshot(`
         "--- from: user (lifecycle-tester)
         Reply with exactly: seq-alpha
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*
         --- from: user (lifecycle-tester)
         Reply with exactly: seq-beta
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*
         --- from: user (lifecycle-tester)
         Reply with exactly: seq-gamma
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*"
       `)
       expect(runtimeAfterC).toBe(runtimeAfterA)
     },
@@ -372,7 +387,7 @@ describe('runtime lifecycle', () => {
   )
 
   test(
-    'footer includes context percentage and model id',
+    'footer includes codex backend metadata',
     async () => {
       const prompt = 'Reply with exactly: footer-check'
       await discord.channel(TEXT_CHANNEL_ID).user(TEST_USER_ID).sendMessage({
@@ -390,7 +405,7 @@ describe('runtime lifecycle', () => {
         discord,
         threadId: thread.id,
         userId: TEST_USER_ID,
-        text: 'deterministic-v2',
+        text: '*project',
         timeout: 4_000,
       })
 
@@ -403,22 +418,24 @@ describe('runtime lifecycle', () => {
         if (!message.content.startsWith('*')) {
           return false
         }
-        return message.content.includes('deterministic-v2')
+        return message.content.includes('codex')
       })
 
-      expect(await discord.thread(thread.id).text()).toMatchInlineSnapshot(`
+      expect(
+        normalizeCodexTimeline(await discord.thread(thread.id).text()),
+      ).toMatchInlineSnapshot(`
         "--- from: user (lifecycle-tester)
         Reply with exactly: footer-check
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*"
       `)
       expect(footerMessage).toBeDefined()
       if (!footerMessage) {
         throw new Error('Expected footer message to be present')
       }
-      expect(footerMessage.content).toContain('deterministic-v2')
-      expect(footerMessage.content).toMatch(/\d+%/)
+      expect(footerMessage.content).toContain('codex')
+      expect(footerMessage.content).not.toContain('%')
     },
     10_000,
   )
@@ -477,17 +494,17 @@ describe('runtime lifecycle', () => {
         timeout: 4_000,
       })
 
-      expect(await th.text()).toMatchInlineSnapshot(`
+      expect(normalizeCodexTimeline(await th.text())).toMatchInlineSnapshot(`
         "--- from: user (lifecycle-tester)
         Reply with exactly: reconnect-alpha
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*
         --- from: user (lifecycle-tester)
         Reply with exactly: reconnect-beta
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*"
       `)
 
       const runtimeAfterRestart = getRuntime(thread.id)
@@ -515,16 +532,18 @@ describe('runtime lifecycle', () => {
         discord,
         threadId: thread.id,
         userId: TEST_USER_ID,
-        text: 'deterministic-v2',
+        text: '*project',
         timeout: 4_000,
       })
 
-      expect(await discord.thread(thread.id).text()).toMatchInlineSnapshot(`
+      expect(
+        normalizeCodexTimeline(await discord.thread(thread.id).text()),
+      ).toMatchInlineSnapshot(`
         "--- from: user (lifecycle-tester)
         Reply with exactly: footer-high-usage
         --- from: assistant (TestBot)
         ⬥ ok
-        *project ⋅ main ⋅ Ns ⋅ N% ⋅ deterministic-v2*"
+        *project ⋅ main ⋅ Ns ⋅ codex ⋅ MODEL*"
       `)
 
       const threadText = await discord.thread(thread.id).text()

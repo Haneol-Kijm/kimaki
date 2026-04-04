@@ -62,6 +62,8 @@ If revisited later:
 - the existing Discord select-menu UX is good reference material
 - Codex plan-mode style interactions are a conceptual reference, not a
   protocol we can directly reuse
+- legacy `queue-advanced-question.e2e` stays reference-only until a Codex
+  question adapter exists
 
 ### Agent Model Surface
 
@@ -71,6 +73,12 @@ If revisited later:
 - do not force a Codex mapping in v1
 - if needed later, redefine "agent" as a preset of prompt/model/reasoning
   behavior instead of copying OpenCode semantics
+
+### Legacy Queue Harness
+
+- `thread-message-queue.e2e` is still an OpenCode-era harness
+- active Codex queue coverage lives in the split queue-advanced tests
+- rewrite it around the mock Codex CLI before re-enabling
 
 ### Voice
 

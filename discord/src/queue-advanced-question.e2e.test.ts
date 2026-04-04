@@ -1,7 +1,6 @@
-// E2e test for question tool: user text message during pending question should
-// dismiss the question (abort), then enqueue as a normal user prompt.
-// The user's message must appear as a real user message in the thread, not
-// get consumed as a tool result answer (which lost voice/image content).
+// Reference-only E2e coverage for the legacy OpenCode question tool adapter.
+// Codex-only does not yet port dropdown-based question flows, so keep these
+// scenarios skipped until a Kimaki-native question/profile adapter exists.
 
 import { describe, test, expect, afterEach } from 'vitest'
 import {
@@ -68,7 +67,7 @@ function setDeterministicTranscription(config: DeterministicTranscriptionConfig 
   })
 }
 
-describe('queue advanced: question tool answer', () => {
+describe.skip('queue advanced: question tool answer', () => {
   const ctx = setupQueueAdvancedSuite({
     channelId: TEXT_CHANNEL_ID,
     channelName: 'qa-question-e2e',
@@ -135,7 +134,7 @@ describe('queue advanced: question tool answer', () => {
 
 })
 
-describe('queue advanced: voice message during pending question', () => {
+describe.skip('queue advanced: voice message during pending question', () => {
   const ctx = setupQueueAdvancedSuite({
     channelId: VOICE_CHANNEL_ID,
     channelName: 'qa-question-voice-e2e',
