@@ -30,6 +30,7 @@ import {
 import {
   ensureKimakiCodexHomeScaffold,
   getKimakiCodexHome,
+  readKimakiDiscordPersona,
 } from '../codex/codex-home.js'
 import { store } from '../store.js'
 import {
@@ -532,6 +533,7 @@ export class CodexThreadRuntime implements SessionRuntime {
 
     const sandboxMode = input.sandboxMode || this.currentSandboxMode
     this.currentSandboxMode = sandboxMode
+    const developerInstructions = await readKimakiDiscordPersona()
 
     const promptText = input.command
       ? await buildCodexPrompt({
@@ -554,6 +556,7 @@ export class CodexThreadRuntime implements SessionRuntime {
       sessionId: persistedSessionId,
       model: cliModel,
       reasoningEffort,
+      developerInstructions,
       sandboxMode,
       images: input.images || [],
     })
@@ -614,6 +617,7 @@ export class CodexThreadRuntime implements SessionRuntime {
     sessionId,
     model,
     reasoningEffort,
+    developerInstructions,
     sandboxMode,
     images,
   }: {
@@ -621,6 +625,7 @@ export class CodexThreadRuntime implements SessionRuntime {
     sessionId?: string
     model?: string
     reasoningEffort?: CodexReasoningEffort
+    developerInstructions?: string
     sandboxMode: CodexSandboxMode
     images: DiscordFileAttachment[]
   }): Promise<CodexTurnResult> {
@@ -640,6 +645,7 @@ export class CodexThreadRuntime implements SessionRuntime {
         promptText,
         model,
         reasoningEffort,
+        developerInstructions,
         sandboxMode,
         imagePaths: tempImagePaths,
       })
@@ -647,6 +653,7 @@ export class CodexThreadRuntime implements SessionRuntime {
         promptText,
         model,
         reasoningEffort,
+        developerInstructions,
         sandboxMode,
         imagePaths: tempImagePaths,
         cwd: this.sdkDirectory,
@@ -912,6 +919,7 @@ export function buildExecArgs({
   promptText,
   model,
   reasoningEffort,
+  developerInstructions,
   sandboxMode,
   imagePaths,
   cwd,
@@ -919,6 +927,7 @@ export function buildExecArgs({
   promptText: string
   model?: string
   reasoningEffort?: CodexReasoningEffort
+  developerInstructions?: string
   sandboxMode: CodexSandboxMode
   imagePaths: string[]
   cwd: string
@@ -932,6 +941,9 @@ export function buildExecArgs({
     args.push('-c', `model_reasoning_effort="${reasoningEffort}"`)
   } else if (model) {
     args.push('-c', 'model_reasoning_effort="high"')
+  }
+  if (developerInstructions?.trim()) {
+    args.push('-c', `developer_instructions=${JSON.stringify(developerInstructions)}`)
   }
 
   if (sandboxMode === 'danger-full-access') {
@@ -953,6 +965,7 @@ export function buildResumeArgs({
   promptText,
   model,
   reasoningEffort,
+  developerInstructions,
   sandboxMode,
   imagePaths,
 }: {
@@ -960,6 +973,7 @@ export function buildResumeArgs({
   promptText: string
   model?: string
   reasoningEffort?: CodexReasoningEffort
+  developerInstructions?: string
   sandboxMode: CodexSandboxMode
   imagePaths: string[]
 }): string[] {
@@ -972,6 +986,9 @@ export function buildResumeArgs({
     args.push('-c', `model_reasoning_effort="${reasoningEffort}"`)
   } else if (model) {
     args.push('-c', 'model_reasoning_effort="high"')
+  }
+  if (developerInstructions?.trim()) {
+    args.push('-c', `developer_instructions=${JSON.stringify(developerInstructions)}`)
   }
 
   if (sandboxMode === 'danger-full-access') {
