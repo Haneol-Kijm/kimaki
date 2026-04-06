@@ -1108,17 +1108,15 @@ export function formatCommandExecution(
     return undefined
   }
 
-  const output = truncate(command.output.trim(), 1200)
-  if (!output) {
-    return `Command failed: \`${command.command}\` (exit ${command.exitCode}).`
-  }
+  const normalized = unwrapShellCommand(command.command)
+  const inlineCommand =
+    normalized &&
+    !normalized.includes('\n') &&
+    normalized.length <= 100
+      ? ` _${escapeInlineMarkdown(normalized)}_`
+      : ''
 
-  return [
-    `Command failed: \`${command.command}\` (exit ${command.exitCode}).`,
-    '```text',
-    output,
-    '```',
-  ].join('\n')
+  return `⨯ bash${inlineCommand} (exit ${command.exitCode})`
 }
 
 export function formatCodexAssistantText(text: string): string | undefined {
