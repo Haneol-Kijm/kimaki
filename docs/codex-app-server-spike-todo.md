@@ -67,6 +67,39 @@ Already confirmed from generated app-server schema/types:
 This means compact, plan-mode style UI, question UI, and context usage are no
 longer speculative benefits. They are real protocol candidates for the spike.
 
+## Confirmed Runtime Signals
+
+Already observed through `codex debug app-server send-message-v2 ...`:
+
+- real lifecycle:
+  - `initialize`
+  - `thread/start`
+  - `turn/start`
+  - `thread/status/changed`
+  - `turn/started`
+  - `item/started`
+  - `item/completed`
+  - `thread/tokenUsage/updated`
+  - `turn/completed`
+- startup noise:
+  - `mcpServer/startupStatus/updated`
+- runtime thread metadata includes:
+  - `serviceTier`
+  - `reasoningEffort`
+  - `approvalPolicy`
+  - `sandbox`
+  - `instructionSources`
+- `thread/tokenUsage/updated` is emitted in practice, not just schema
+- `turn/plan/updated` is emitted in practice
+- `request_user_input` exists in practice but is rejected in Default mode
+
+## Immediate Follow-Up Questions
+
+- Which collaboration mode is required for `request_user_input` to succeed?
+- Can Kimaki set that mode per turn without breaking normal chat behavior?
+- Can `turn/plan/updated` alone already power a partial plan UI before full
+  structured input support?
+
 ## Exit Criteria
 
 Keep the migration if the spike proves:

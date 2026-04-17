@@ -175,6 +175,58 @@ That changes the migration outlook. This is no longer just "maybe remote is a
 better transport". It is also "remote may already support the exact control
 surfaces Kimaki wants to expose".
 
+## Observed Runtime Probe Results
+
+This spike did not stop at generated schema inspection. A real
+`codex debug app-server send-message-v2 ...` probe was run locally.
+
+Observed happy-path lifecycle:
+
+- `initialize`
+- `thread/start`
+- `turn/start`
+- `thread/status/changed`
+- `turn/started`
+- `item/started` / `item/completed` for:
+  - `userMessage`
+  - `reasoning`
+  - `agentMessage`
+- `thread/tokenUsage/updated`
+- `turn/completed`
+
+Observed runtime details from the probe:
+
+- `thread/start` returned:
+  - real `thread.id`
+  - `serviceTier: "fast"`
+  - `reasoningEffort: "xhigh"`
+  - `approvalPolicy: "never"`
+  - `sandbox: dangerFullAccess`
+  - `instructionSources` including repo `AGENTS.md`
+- `thread/tokenUsage/updated` is not just schema-level; it is emitted in a real
+  run and includes:
+  - `total`
+  - `last`
+  - `modelContextWindow`
+- `mcpServer/startupStatus/updated` also appears during startup
+
+Most importantly for future Kimaki UX:
+
+- asking the model to use `request_user_input` in Default mode produced a real
+  runtime error:
+  - `request_user_input is unavailable in Default mode`
+- the same turn still emitted `turn/plan/updated`
+- after the tool was rejected, the model fell back to a plain-text numbered
+  question in the final answer
+
+This means:
+
+- plan updates are real at runtime, not just declared in schema
+- structured user input is also real, but gated by collaboration mode
+- a future Kimaki question UI likely needs:
+  - collaboration-mode awareness
+  - graceful fallback when structured elicitation is unavailable
+
 Why that matters:
 
 - better session continuity without local session-file juggling
@@ -195,6 +247,9 @@ becomes stable enough.
 - current prompt/config layer assumes local `CODEX_HOME`
 - the protocol has `requestUserInput`, but Kimaki still needs a Discord adapter
   and lifecycle rules around expiry, stale prompts, and interrupt
+- `requestUserInput` appears to be blocked in Default mode, so Kimaki will need
+  to understand or set collaboration mode explicitly instead of assuming the
+  tool is always available
 - websocket auth modes (`capability-token`, `signed-bearer-token`) exist, but
   are not yet exercised in Kimaki
 - there is no evidence yet that every desired capability is stable in the same
@@ -259,7 +314,8 @@ These are the current transport and control-plane surface.
 4. Probe whether `/compact` can be implemented as a true remote protocol call
    instead of a Kimaki-managed summarize-and-reopen fallback.
 5. Probe whether request-user-input / plan events can drive the existing
-   Discord question UI with a thinner adapter than the OpenCode path needs.
+   Discord question UI with a thinner adapter than the OpenCode path needs,
+   including what collaboration mode is required.
 6. Build a minimal spike runtime that can:
    - start a remote-backed session
    - stream assistant output
