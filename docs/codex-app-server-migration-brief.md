@@ -15,6 +15,19 @@ This is not a small refactor. The current Codex path is a CLI-turn adapter that:
 The app-server migration should preserve the current Discord UX where possible,
 but replace the transport/session driver layer.
 
+## Upstream Structure Shift
+
+Latest upstream `0.5.0` no longer uses `discord/` as the main package. The
+runtime now lives under `cli/`.
+
+This matters immediately:
+
+- migration work should target `cli/src/...`, not `discord/src/...`
+- old Codex-port files are still useful as behavior references, not as direct
+  patch locations
+- "carry forward" means reapplying ideas into the new `cli/` structure, not
+  cherry-picking old file paths blindly
+
 ## Branch Strategy
 
 ### Stable branch to keep
@@ -67,24 +80,25 @@ As of this spike creation:
 ### Reuse as-is or nearly as-is
 
 These are transport-agnostic or mostly UX/config concerns and should likely be
-reapplied early on the new branch.
+reapplied early on the new branch, but now against `cli/src/...` rather than
+the old `discord/src/...` layout.
 
-- `discord/src/codex/codex-prompt.ts`
+- `codex prompt/persona wrapper`
   - mobile-first Discord prompt wrapper
   - critique/upload guidance
-- `discord/src/codex/codex-models.ts`
+- `Codex model defaults and discovery`
   - Codex model discovery/default model handling
-- `discord/src/commands/codex-model.ts`
+- `model and reasoning effort UI`
   - model and reasoning effort UI
-- `discord/src/codex/retry-controls.ts`
+- `retry/escalation button UX`
   - retry/escalation UI copy and button flow
-- `discord/src/commands/codex-retry.ts`
+- `retry interaction handling`
   - retry interaction handling
-- `discord/src/session-handler/thread-runtime-state.ts`
+- `queue state helpers`
   - generic queue state helpers
-- `discord/src/commands/restart.ts`
+- `/restart`
   - restart-only command matches current deployment model
-- `discord/src/commands/create-new-project.ts`
+- `Korean first-turn project prompt`
   - keep the Korean first-turn prompt behavior
 
 ### Reuse conceptually, but redesign implementation
@@ -92,21 +106,20 @@ reapplied early on the new branch.
 These carry valuable behavior, but the implementation is tied to the local CLI
 transport and should not be cherry-picked blindly.
 
-- `discord/src/session-handler/codex-thread-runtime.ts`
+- `codex-thread-runtime`
   - currently owns `codex exec`/`resume`, stdout JSONL parsing, footer synthesis,
     local interrupt, typing keepalive, and retry state
-- `discord/src/session-handler/thread-session-runtime.ts`
+- `thread-session-runtime`
   - runtime registry and lifecycle assumptions are still shaped around the
     existing process/session model
-- `discord/src/commands/session.ts`
-- `discord/src/commands/resume.ts`
-- `discord/src/commands/session-id.ts`
-- `discord/src/commands/compact.ts`
-  - still OpenCode summarize-based today; should be redefined for Codex
-- `discord/src/codex/codex-home.ts`
+- `/session`, `/resume`, `/session-id`
+- `/compact`
+  - old implementation is OpenCode summarize-based today; Codex should use a
+    real protocol surface if app-server exposes one
+- `codex-home`
   - useful settings and persona scaffolding, but currently assumes a local
     `CODEX_HOME` and local auth bootstrap
-- `discord/src/cli.ts`
+- CLI bootstrap/auth glue
   - any bootstrap logic related to local Codex home/auth should become
     transport-aware or remote-aware
 
@@ -126,13 +139,49 @@ for the old local CLI path.
 
 ## Why App-Server Is Attractive
 
-If Codex `app-server` / `remote` becomes stable enough, it should improve the
-exact pain points that are awkward in the current `exec/resume` adapter:
+The biggest new finding from this spike is that app-server already exposes
+protocol-level surfaces for several features that are awkward or missing in the
+current `exec/resume` adapter.
+
+Confirmed protocol signals from generated app-server types/schema:
+
+- compaction:
+  - `thread/compact/start`
+  - `thread/compacted`
+- interrupt:
+  - `turn/interrupt`
+- plan updates:
+  - `turn/plan/updated`
+  - `item/plan/delta`
+- structured user input:
+  - `item/tool/requestUserInput`
+  - question objects with `header`, `id`, `question`, `options`, `isOther`,
+    and `isSecret`
+- token usage:
+  - `thread/tokenUsage/updated`
+- realtime/media:
+  - `thread/realtime/started`
+  - `thread/realtime/transcript/delta`
+  - `thread/realtime/outputAudio/delta`
+  - `thread/realtime/sdp`
+- config surfaces:
+  - `compact_prompt`
+  - `model_auto_compact_token_limit`
+  - `developer_instructions`
+  - `service_tier`
+  - `model_reasoning_effort`
+
+That changes the migration outlook. This is no longer just "maybe remote is a
+better transport". It is also "remote may already support the exact control
+surfaces Kimaki wants to expose".
+
+Why that matters:
 
 - better session continuity without local session-file juggling
 - cleaner restart and reconnect semantics
-- a more natural place for `/compact`
-- a more natural place for plan/question style interaction UIs
+- a real protocol place for `/compact`
+- a real protocol place for plan/question style interaction UIs
+- token-usage updates without log scraping or local heuristics
 - a better path toward browser/computer-use artifacts and control
 
 In other words: this is the right long-term direction if the server protocol
@@ -144,28 +193,61 @@ becomes stable enough.
 - remote auth story is not yet integrated into Kimaki
 - current event derivation assumes OpenCode-like message/part shapes
 - current prompt/config layer assumes local `CODEX_HOME`
-- current question UI is not a direct Codex feature and will still need a
-  Kimaki-native adapter even after transport migration
+- the protocol has `requestUserInput`, but Kimaki still needs a Discord adapter
+  and lifecycle rules around expiry, stale prompts, and interrupt
+- websocket auth modes (`capability-token`, `signed-bearer-token`) exist, but
+  are not yet exercised in Kimaki
+- there is no evidence yet that every desired capability is stable in the same
+  way the generated schema is
+
+## Latest Upstream Runtime Map
+
+The key runtime files in latest upstream `cli/` are:
+
+- `cli/src/bin.ts`
+- `cli/src/cli.ts`
+- `cli/src/discord-bot.ts`
+- `cli/src/interaction-handler.ts`
+- `cli/src/opencode.ts`
+- `cli/src/session-handler/thread-session-runtime.ts`
+- `cli/src/session-handler/thread-runtime-state.ts`
+- `cli/src/session-handler/event-stream-state.ts`
+- `cli/src/store.ts`
+
+Transport seams that would be replaced or heavily redesigned:
+
+- `ThreadSessionRuntime.submitViaOpencodeQueue`
+- `ThreadSessionRuntime.dispatchPrompt`
+- `ThreadSessionRuntime.abortSessionViaApi`
+- `ThreadSessionRuntime.startEventListener`
+- `ThreadSessionRuntime.ensureSession`
+- `cli/src/opencode-command-detection.ts`
+- `cli/src/external-opencode-sync.ts`
 
 ## First Redesign Targets
 
-These files should be treated as the initial hard boundary for the spike:
+These files should be treated as the initial hard boundary for the spike in the
+latest `cli/` layout:
 
-- `discord/src/session-handler/codex-thread-runtime.ts`
-- `discord/src/session-handler/thread-session-runtime.ts`
-- `discord/src/session-handler/event-stream-state.ts`
-- `discord/src/interaction-handler.ts`
-- `discord/src/commands/session.ts`
-- `discord/src/commands/resume.ts`
-- `discord/src/commands/abort.ts`
-- `discord/src/commands/session-id.ts`
-- `discord/src/commands/compact.ts`
+- `cli/src/session-handler/thread-session-runtime.ts`
+- `cli/src/session-handler/event-stream-state.ts`
+- `cli/src/interaction-handler.ts`
+- `cli/src/commands/session.ts`
+- `cli/src/commands/resume.ts`
+- `cli/src/commands/abort.ts`
+- `cli/src/commands/compact.ts`
+- `cli/src/commands/ask-question.ts`
+- `cli/src/opencode.ts`
+- `cli/src/opencode-interrupt-plugin.ts`
 
 These are the current transport and control-plane surface.
 
 ## Recommended Spike Sequence
 
-1. Confirm the actual Codex `app-server` / `remote` protocol and event model.
+1. Build a minimal local Codex app-server probe:
+   - start `codex app-server`
+   - inspect stdio or websocket transport
+   - verify auth/session startup assumptions
 2. Write a small adapter document mapping:
    - current Discord runtime events
    - app-server events
@@ -174,15 +256,16 @@ These are the current transport and control-plane surface.
    - remote session id
    - local thread mapping
    - whether `CODEX_HOME` remains local-only or becomes optional
-4. Redefine `/compact` for Codex:
-   - either true remote compaction if supported
-   - or Kimaki-managed "summarize and reopen new session" fallback
-5. Build a minimal spike runtime that can:
+4. Probe whether `/compact` can be implemented as a true remote protocol call
+   instead of a Kimaki-managed summarize-and-reopen fallback.
+5. Probe whether request-user-input / plan events can drive the existing
+   Discord question UI with a thinner adapter than the OpenCode path needs.
+6. Build a minimal spike runtime that can:
    - start a remote-backed session
    - stream assistant output
    - interrupt
    - continue same Discord thread
-6. Only after that, port higher-level UX:
+7. Only after that, port higher-level UX:
    - retry buttons
    - plan/question UI
    - agent/profile ideas
@@ -194,7 +277,9 @@ The spike is worth keeping only if it can prove all of these:
 - same Discord thread can survive a server reconnect
 - interrupt still works without local CLI child-process control
 - footer/model/session handling still makes sense
-- `/compact` is either fixed or replaced with a clearly better contract
-- plan/question style UI becomes more plausible, not less
+- `/compact` is either fixed through real protocol support or replaced with a
+  clearly better contract
+- plan/question style UI becomes more plausible through protocol signals, not
+  less
 
 If those do not improve, the `exec/resume` path should remain the default.

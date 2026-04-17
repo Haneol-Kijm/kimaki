@@ -7,14 +7,12 @@ Explore whether Kimaki should migrate the Codex runtime from local
 
 ## Immediate Tasks
 
-- Inspect the real `codex app-server` surface and protocol shape
-- Inspect whether `--remote` and remote auth are sufficient for Kimaki
-- Identify whether app-server exposes a true compact/session-summary primitive
-- Identify whether app-server exposes session lifecycle events useful for:
-  - interrupt
-  - idle/completion
-  - question/plan mode
-  - artifacts/browser-control
+- Build a tiny `codex app-server` probe and confirm transport shape in practice
+- Verify whether `--remote` and websocket auth are sufficient for Kimaki
+- Map current `cli/src/session-handler/thread-session-runtime.ts` expectations
+  onto app-server protocol notifications
+- Identify which Discord UX surfaces become thinner adapters instead of
+  transport-specific implementations
 
 ## Reuse Early
 
@@ -48,6 +46,26 @@ Explore whether Kimaki should migrate the Codex runtime from local
 - What becomes the source of truth for session state?
 - Can remote transport make plan/question UI simpler?
 - Can remote transport eventually subsume screenshare/browser-control flows?
+- Can `thread/compact/start` replace Kimaki-managed summarization?
+- Can `item/tool/requestUserInput` replace the current OpenCode-only question
+  contract?
+- Can `thread/tokenUsage/updated` replace local footer heuristics?
+
+## Confirmed Protocol Signals
+
+Already confirmed from generated app-server schema/types:
+
+- `thread/compact/start`
+- `thread/compacted`
+- `turn/interrupt`
+- `turn/plan/updated`
+- `item/plan/delta`
+- `item/tool/requestUserInput`
+- `thread/tokenUsage/updated`
+- realtime notifications under `thread/realtime/*`
+
+This means compact, plan-mode style UI, question UI, and context usage are no
+longer speculative benefits. They are real protocol candidates for the spike.
 
 ## Exit Criteria
 
