@@ -6,6 +6,7 @@ import {
   deletePendingQuestionContextsForRequest,
   pendingQuestionContexts,
   showAskUserQuestionDropdowns,
+  showStructuredQuestionDropdowns,
 } from './ask-question.js'
 
 function createFakeThread(): ThreadChannel {
@@ -76,6 +77,7 @@ describe('ask-question', () => {
       thread,
       requestId: 'req-1',
       questions: [{
+        id: '0',
         question: 'Choose one',
         header: 'Pick',
         options: [
@@ -87,6 +89,7 @@ describe('ask-question', () => {
       totalQuestions: 1,
       answeredCount: 0,
       contextHash: 'ctx-1',
+      logLabel: 'test question',
     }
 
     pendingQuestionContexts.set('ctx-1', baseContext)
@@ -107,5 +110,47 @@ describe('ask-question', () => {
 
     expect(removed).toBe(2)
     expect([...pendingQuestionContexts.keys()]).toEqual(['ctx-3'])
+  })
+
+  test('dedupes structured question requests for the same thread', async () => {
+    const thread = createFakeThread()
+    const submitAnswers = vi.fn(async () => {})
+
+    await showStructuredQuestionDropdowns({
+      thread,
+      requestId: 'rpc-1',
+      questions: [
+        {
+          id: 'branch_strategy',
+          question: 'Which branch strategy should I use?',
+          header: 'Branch',
+          options: [
+            { label: 'Start new branch', description: 'Safe default' },
+            { label: 'Keep current branch', description: 'Continue here' },
+          ],
+        },
+      ],
+      submitAnswers,
+    })
+
+    await showStructuredQuestionDropdowns({
+      thread,
+      requestId: 'rpc-1',
+      questions: [
+        {
+          id: 'branch_strategy',
+          question: 'Which branch strategy should I use?',
+          header: 'Branch',
+          options: [
+            { label: 'Start new branch', description: 'Safe default' },
+            { label: 'Keep current branch', description: 'Continue here' },
+          ],
+        },
+      ],
+      submitAnswers,
+    })
+
+    expect(thread.send).toHaveBeenCalledTimes(1)
+    expect(pendingQuestionContexts.size).toBe(1)
   })
 })

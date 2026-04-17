@@ -16,32 +16,60 @@ import { createLogger, LogPrefix } from '../logger.js'
 
 const logger = createLogger(LogPrefix.ASK_QUESTION)
 
+export type AskUserQuestionOption = {
+  label: string
+  description: string
+}
+
+export type AskUserQuestionDefinition = {
+  id: string
+  question: string
+  header: string
+  options: AskUserQuestionOption[]
+  multiple?: boolean
+}
+
 // Schema matching the question tool input
 export type AskUserQuestionInput = {
   questions: Array<{
     question: string
     header: string // max 12 chars
-    options: Array<{
-      label: string
-      description: string
-    }>
+    options: AskUserQuestionOption[]
     multiple?: boolean // optional, defaults to false
   }>
 }
 
 export type CancelQuestionResult = 'no-pending' | 'replied' | 'reply-failed'
 
-type PendingQuestionContext = {
+type SubmitQuestionAnswersHandler = (args: {
+  answersByQuestionId: Record<string, string[]>
+  context: PendingQuestionContext
+}) => Promise<void>
+
+type ReplyWithUserMessageHandler = (args: {
+  userMessage: string
+  answersByQuestionId: Record<string, string[]>
+  context: PendingQuestionContext
+}) => Promise<void>
+
+type ExpireQuestionHandler = (args: {
+  context: PendingQuestionContext
+}) => Promise<void>
+
+export type PendingQuestionContext = {
   sessionId: string
   directory: string
   thread: ThreadChannel
   requestId: string // OpenCode question request ID for replying
-  questions: AskUserQuestionInput['questions']
+  questions: AskUserQuestionDefinition[]
   answers: Record<number, string[]> // questionIndex -> selected labels
   totalQuestions: number
   answeredCount: number
   contextHash: string
-
+  submitAnswers?: SubmitQuestionAnswersHandler
+  replyWithUserMessage?: ReplyWithUserMessageHandler
+  onExpire?: ExpireQuestionHandler
+  logLabel: string
 }
 
 // Store pending question contexts by hash.
@@ -97,25 +125,42 @@ export function hasPendingQuestionForThread(threadId: string): boolean {
   })
 }
 
-/**
- * Show dropdown menus for question tool input.
- * Sends one message per question with the dropdown directly under the question text.
- */
-export async function showAskUserQuestionDropdowns({
+function buildAnswersByQuestionId(
+  context: PendingQuestionContext,
+): Record<string, string[]> {
+  const answersByQuestionId: Record<string, string[]> = {}
+  for (let i = 0; i < context.questions.length; i++) {
+    const question = context.questions[i]
+    if (!question) {
+      continue
+    }
+    answersByQuestionId[question.id] = context.answers[i] || []
+  }
+  return answersByQuestionId
+}
+
+async function showPendingQuestionDropdowns({
   thread,
   sessionId,
   directory,
   requestId,
-  input,
+  questions,
   silent,
+  submitAnswers,
+  replyWithUserMessage,
+  onExpire,
+  logLabel,
 }: {
   thread: ThreadChannel
   sessionId: string
   directory: string
-  requestId: string // OpenCode question request ID
-  input: AskUserQuestionInput
-  /** Suppress notification when queue has pending items */
+  requestId: string
+  questions: AskUserQuestionDefinition[]
   silent?: boolean
+  submitAnswers?: SubmitQuestionAnswersHandler
+  replyWithUserMessage?: ReplyWithUserMessageHandler
+  onExpire?: ExpireQuestionHandler
+  logLabel: string
 }): Promise<void> {
   const existingPending = findPendingQuestionContextForRequest({
     threadId: thread.id,
@@ -135,32 +180,36 @@ export async function showAskUserQuestionDropdowns({
     directory,
     thread,
     requestId,
-    questions: input.questions,
+    questions,
     answers: {},
-    totalQuestions: input.questions.length,
+    totalQuestions: questions.length,
     answeredCount: 0,
     contextHash,
-
+    submitAnswers,
+    replyWithUserMessage,
+    onExpire,
+    logLabel,
   }
 
   pendingQuestionContexts.set(contextHash, context)
-  // On TTL expiry: hide the dropdown UI and abort the session so OpenCode
-  // unblocks. We intentionally do NOT call question.reply() — sending 'Other'
-  // made the model think the user chose an option when they didn't.
+
   setTimeout(async () => {
     const ctx = pendingQuestionContexts.get(contextHash)
     if (!ctx) {
       return
     }
-    // Delete context first so the dropdown becomes inert immediately.
-    // Without this, a user clicking during the abort() await would still
-    // be accepted by handleAskQuestionSelectMenu, then abort() would
-    // kill that valid run.
     deletePendingQuestionContextsForRequest({
       threadId: ctx.thread.id,
       requestId: ctx.requestId,
     })
-    // Abort the session so OpenCode isn't stuck waiting for a reply
+
+    if (ctx.onExpire) {
+      await ctx.onExpire({ context: ctx }).catch((error) => {
+        logger.error('Failed to handle question expiry:', error)
+      })
+      return
+    }
+
     const client = getOpencodeClient(ctx.directory)
     if (client) {
       await client.session.abort({
@@ -171,12 +220,12 @@ export async function showAskUserQuestionDropdowns({
     }
   }, QUESTION_CONTEXT_TTL_MS).unref()
 
-  // Send one message per question with its dropdown directly underneath
-  for (let i = 0; i < input.questions.length; i++) {
-    const q = input.questions[i]!
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i]
+    if (!q) {
+      continue
+    }
 
-    // Map options to Discord select menu options
-    // Discord max: 25 options per select menu
     const options = [
       ...q.options.slice(0, 24).map((opt, optIdx) => ({
         label: opt.label.slice(0, 100),
@@ -197,7 +246,6 @@ export async function showAskUserQuestionDropdowns({
       .setPlaceholder(placeholder)
       .addOptions(options)
 
-    // Enable multi-select if the question supports it
     if (q.multiple) {
       selectMenu.setMinValues(1)
       selectMenu.setMaxValues(options.length)
@@ -214,8 +262,86 @@ export async function showAskUserQuestionDropdowns({
   }
 
   logger.log(
-    `Showed ${input.questions.length} question dropdown(s) for session ${sessionId}`,
+    `Showed ${questions.length} question dropdown(s) for ${logLabel}`,
   )
+}
+
+export async function showStructuredQuestionDropdowns({
+  thread,
+  requestId,
+  questions,
+  submitAnswers,
+  replyWithUserMessage,
+  onExpire,
+  silent,
+  sessionId = 'structured-question',
+  directory = '',
+  logLabel = 'structured question',
+}: {
+  thread: ThreadChannel
+  requestId: string
+  questions: AskUserQuestionDefinition[]
+  submitAnswers: SubmitQuestionAnswersHandler
+  replyWithUserMessage?: ReplyWithUserMessageHandler
+  onExpire?: ExpireQuestionHandler
+  silent?: boolean
+  sessionId?: string
+  directory?: string
+  logLabel?: string
+}): Promise<void> {
+  await showPendingQuestionDropdowns({
+    thread,
+    sessionId,
+    directory,
+    requestId,
+    questions,
+    silent,
+    submitAnswers,
+    replyWithUserMessage,
+    onExpire,
+    logLabel,
+  })
+}
+
+/**
+ * Show dropdown menus for question tool input.
+ * Sends one message per question with the dropdown directly under the question text.
+ */
+export async function showAskUserQuestionDropdowns({
+  thread,
+  sessionId,
+  directory,
+  requestId,
+  input,
+  silent,
+}: {
+  thread: ThreadChannel
+  sessionId: string
+  directory: string
+  requestId: string // OpenCode question request ID
+  input: AskUserQuestionInput
+  /** Suppress notification when queue has pending items */
+  silent?: boolean
+}): Promise<void> {
+  const questions: AskUserQuestionDefinition[] = input.questions.map((q, i) => {
+    return {
+      id: `${i}`,
+      question: q.question,
+      header: q.header,
+      options: q.options,
+      multiple: q.multiple,
+    }
+  })
+
+  await showPendingQuestionDropdowns({
+    thread,
+    sessionId,
+    directory,
+    requestId,
+    questions,
+    silent,
+    logLabel: `session ${sessionId}`,
+  })
 }
 
 /**
@@ -287,7 +413,14 @@ export async function handleAskQuestionSelectMenu(
   // Check if all questions are answered
   if (context.answeredCount >= context.totalQuestions) {
     // All questions answered - send result back to session
-    await submitQuestionAnswers(context)
+    if (context.submitAnswers) {
+      await context.submitAnswers({
+        answersByQuestionId: buildAnswersByQuestionId(context),
+        context,
+      })
+    } else {
+      await submitQuestionAnswers(context)
+    }
     deletePendingQuestionContextsForRequest({
       threadId: context.thread.id,
       requestId: context.requestId,
@@ -424,6 +557,13 @@ export async function cancelPendingQuestion(
   }
 
   try {
+    if (context.replyWithUserMessage) {
+      await context.replyWithUserMessage({
+        userMessage,
+        answersByQuestionId: buildAnswersByQuestionId(context),
+        context,
+      })
+    } else {
     const client = getOpencodeClient(context.directory)
     if (!client) {
       throw new Error('OpenCode server not found for directory')
@@ -438,6 +578,7 @@ export async function cancelPendingQuestion(
       directory: context.directory,
       answers,
     })
+    }
 
     logger.log(`Answered question ${context.requestId} with user message`)
   } catch (error) {
