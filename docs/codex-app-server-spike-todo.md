@@ -112,6 +112,18 @@ Already observed through a direct stdio JSON-RPC probe against
   - final assistant output arrives
   - `turn/completed` fires
 
+Already observed through a resume continuity probe:
+
+- existing Discord `thread_sessions.session_id` values in
+  `~/.kimaki/discord-sessions.db` line up with persisted rollout files under
+  `~/.kimaki/codex-home/sessions/...`
+- `thread/resume` against the live Kimaki `CODEX_HOME` succeeds for an existing
+  Discord-backed exec session and returns the historical turns
+- resuming the same session from a copied `CODEX_HOME` and then running a new
+  `turn/start` also succeeds
+- this means app-server continuity is plausible for existing Discord sessions,
+  not just newly created app-server threads
+
 ## Immediate Follow-Up Questions
 
 - Which turns should Kimaki run in `plan` mode vs `default` mode?
@@ -119,6 +131,10 @@ Already observed through a direct stdio JSON-RPC probe against
 - Can `turn/plan/updated` alone already power a partial plan UI before full
   structured input support?
 - What is the right server-request-id mapping layer for Discord interactions?
+- Which resume strategy is safest for existing live threads:
+  - direct same-home resume
+  - copied-home validation first
+  - opt-in migration only for newly active threads
 
 ## Exit Criteria
 

@@ -239,6 +239,49 @@ produced a successful structured input flow:
   successfully resumed the turn
 - the turn then continued to a final assistant message and `turn/completed`
 
+## Session Continuity Findings
+
+The biggest practical migration risk was whether app-server could pick up the
+same persisted Codex sessions that the current Discord runtime already created.
+
+That continuity was verified.
+
+Using the current live Kimaki data:
+
+- SQLite `thread_sessions.session_id` values from `~/.kimaki/discord-sessions.db`
+  match the persisted rollout ids under:
+  - `~/.kimaki/codex-home/sessions/.../rollout-...-<session_id>.jsonl`
+- a direct `thread/resume` probe against the live `CODEX_HOME`:
+  - `CODEX_HOME=/home/haneol/.kimaki/codex-home`
+  - `threadId=019d5e1f-64a5-7a30-ad8d-45b0f163dad3`
+  successfully returned:
+  - the original `thread.id`
+  - `source: "exec"`
+  - original `cwd`
+  - persisted `path`
+  - full historical `turns[]`
+  - `status: idle`
+
+To avoid perturbing the live runtime, a second probe used a copied home:
+
+- copied `~/.kimaki/codex-home` to `/tmp/kimaki-codex-home-resume-probe`
+- resumed the same thread id in that copied home
+- started a fresh turn on the resumed thread
+- observed a completed assistant reply:
+  - `app-server resume probe ok`
+
+This matters because it removes the worst-case migration fear. App-server does
+not appear limited to "new threads only". At least for local same-home
+continuity, it can resume existing Discord-backed exec sessions and continue
+them.
+
+What is still not proven:
+
+- whether Kimaki should do this automatically for all existing live threads
+- whether every historical session shape resumes equally well
+- whether app-server resume preserves all Discord-specific adapter expectations
+  without extra normalization
+
 This means:
 
 - plan updates are real at runtime, not just declared in schema
