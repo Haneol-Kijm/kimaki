@@ -49,12 +49,7 @@ export type ThreadStatus =
   | { type: string; activeFlags?: string[] }
 
 export type ThreadStartResponse = {
-  thread: {
-    id: string
-    cwd: string
-    path?: string | null
-    status: ThreadStatus
-  }
+  thread: AppServerThread
   model?: string
   serviceTier?: string | null
   reasoningEffort?: string | null
@@ -68,6 +63,66 @@ export type TurnStartResponse = {
     id: string
     status: string
   }
+}
+
+export type AppServerUserMessageItem = {
+  type: 'userMessage'
+  id: string
+  content: Array<{
+    type: 'text'
+    text: string
+    text_elements?: unknown[]
+  }>
+}
+
+export type AppServerReasoningItem = {
+  type: 'reasoning'
+  id: string
+  summary: unknown[]
+  content: unknown[]
+}
+
+export type AppServerAgentMessageItem = {
+  type: 'agentMessage'
+  id: string
+  text: string
+  phase: string
+  memoryCitation: string | null
+}
+
+export type AppServerItem =
+  | AppServerUserMessageItem
+  | AppServerReasoningItem
+  | AppServerAgentMessageItem
+
+export type AppServerTurn = {
+  id: string
+  items: AppServerItem[]
+  status: string
+  error?: unknown
+  startedAt?: number | null
+  completedAt?: number | null
+  durationMs?: number | null
+}
+
+export type AppServerThread = {
+  id: string
+  cwd: string
+  path?: string | null
+  status: ThreadStatus
+  source?: string | null
+  preview?: string
+  turns?: AppServerTurn[]
+}
+
+export type ThreadResumeResponse = {
+  thread: AppServerThread
+  model?: string
+  serviceTier?: string | null
+  reasoningEffort?: string | null
+  approvalPolicy?: string
+  sandbox?: unknown
+  instructionSources?: string[]
 }
 
 export type RequestUserInputQuestionOption = {
@@ -139,18 +194,31 @@ export type ThreadStatusChangedParams = {
 
 export type TurnCompletedParams = {
   threadId: string
-  turn: {
-    id: string
-    status: string
-    error?: unknown
-    startedAt?: number | null
-    completedAt?: number | null
-    durationMs?: number | null
-  }
+  turn: AppServerTurn
+}
+
+export type ItemStartedOrCompletedParams = {
+  threadId: string
+  turnId: string
+  item: AppServerItem
+}
+
+export type AgentMessageDeltaParams = {
+  threadId: string
+  turnId: string
+  itemId: string
+  delta: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function hasStringField(
+  value: Record<string, unknown>,
+  key: string,
+): value is Record<string, string> {
+  return typeof value[key] === 'string'
 }
 
 export function isJsonRpcResponse<T = unknown>(
@@ -221,4 +289,46 @@ export function isTurnCompletedEvent(
   params: TurnCompletedParams
 } {
   return value.method === 'turn/completed' && value.params !== undefined
+}
+
+export function isItemStartedEvent(
+  value: JsonRpcServerEvent,
+): value is JsonRpcServerEvent & {
+  method: 'item/started'
+  params: ItemStartedOrCompletedParams
+} {
+  return value.method === 'item/started' && value.params !== undefined
+}
+
+export function isItemCompletedEvent(
+  value: JsonRpcServerEvent,
+): value is JsonRpcServerEvent & {
+  method: 'item/completed'
+  params: ItemStartedOrCompletedParams
+} {
+  return value.method === 'item/completed' && value.params !== undefined
+}
+
+export function isAgentMessageDeltaEvent(
+  value: JsonRpcServerEvent,
+): value is JsonRpcServerEvent & {
+  method: 'item/agentMessage/delta'
+  params: AgentMessageDeltaParams
+} {
+  return value.method === 'item/agentMessage/delta' && value.params !== undefined
+}
+
+export function isAppServerAgentMessageItem(
+  value: unknown,
+): value is AppServerAgentMessageItem {
+  if (!isRecord(value)) {
+    return false
+  }
+  return (
+    value['type'] === 'agentMessage'
+    && hasStringField(value, 'id')
+    && hasStringField(value, 'text')
+    && hasStringField(value, 'phase')
+    && (value['memoryCitation'] === null || typeof value['memoryCitation'] === 'string')
+  )
 }

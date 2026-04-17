@@ -41,6 +41,9 @@ import {
   getChannelVerbosity,
   getPartMessageIds,
   setPartMessage,
+  getChannelModel,
+  getGlobalModel,
+  getSessionModel,
   getThreadSession,
   setThreadSession,
   getThreadWorktree,
@@ -62,6 +65,10 @@ import {
   pendingQuestionContexts,
   cancelPendingQuestion,
 } from '../commands/ask-question.js'
+import {
+  showAppServerQuestionDropdowns,
+  normalizeAppServerPlanUpdate,
+} from '../codex-app-server/discord-bridge.js'
 import {
   showActionButtons,
   waitForQueuedActionButtonsRequest,
@@ -135,6 +142,25 @@ import { createDebouncedProcessFlush } from '../debounced-process-flush.js'
 import { cancelHtmlActionsForThread } from '../html-actions.js'
 import { createDebouncedTimeout } from '../debounce-timeout.js'
 import { extractLeadingOpencodeCommand } from '../opencode-command-detection.js'
+import { CodexAppServerClient } from '../codex-app-server/client.js'
+import {
+  getExperimentalCodexHome,
+  isExperimentalCodexAppServerEnabled,
+} from '../codex-app-server/config.js'
+import {
+  isAgentMessageDeltaEvent,
+  isAppServerAgentMessageItem,
+  isItemCompletedEvent,
+  isItemStartedEvent,
+  isRequestUserInputEvent,
+  isThreadStatusChangedEvent,
+  isThreadTokenUsageUpdatedEvent,
+  isTurnCompletedEvent,
+  isTurnPlanUpdatedEvent,
+  type AppServerReasoningEffort,
+  type JsonRpcServerEvent,
+  type TurnPlanUpdatedParams,
+} from '../codex-app-server/types.js'
 
 const logger = createLogger(LogPrefix.SESSION)
 const discordLogger = createLogger(LogPrefix.DISCORD)
@@ -665,6 +691,21 @@ export class ThreadSessionRuntime {
     })
   }
 
+  private usesExperimentalCodexAppServer(): boolean {
+    return isExperimentalCodexAppServerEnabled()
+  }
+
+  private disposeCodexAppServerClient(): void {
+    this.codexAppServerClient?.dispose()
+    this.codexAppServerClient = null
+    this.codexAppServerCurrentTurnId = null
+    this.codexAppServerRunStartedAt = null
+    this.codexAppServerLastTokenUsage = null
+    this.codexAppServerLastPlanFingerprint = null
+    this.codexAppServerModelId = null
+    this.codexAppServerReasoningEffort = null
+  }
+
   private consumeWorktreePromptChange(
     worktree: WorktreeInfo | undefined,
   ): boolean {
@@ -933,6 +974,7 @@ export class ThreadSessionRuntime {
   dispose(): void {
     this.disposed = true
     this.state?.listenerController?.abort()
+    this.disposeCodexAppServerClient()
     // waitForEvent loops check listenerAborted and exit naturally.
     threadState.updateThread(this.threadId, (t) => ({
       ...t,
@@ -976,6 +1018,7 @@ export class ThreadSessionRuntime {
       `[LISTENER] sdkDirectory changed for thread ${this.threadId}: ${oldDirectory} → ${newDirectory}`,
     )
     this.sdkDirectory = newDirectory
+    this.disposeCodexAppServerClient()
 
     // Clear cached session — it was created under the old directory's
     // opencode Instance and can't be reused from the new one.
@@ -1002,6 +1045,9 @@ export class ThreadSessionRuntime {
   }: {
     port: number
   }): void {
+    if (this.usesExperimentalCodexAppServer()) {
+      return
+    }
     if (!this.state?.sessionId) {
       return
     }
@@ -1300,6 +1346,11 @@ export class ThreadSessionRuntime {
   // Run abort never affects this loop.
 
   async startEventListener(): Promise<void> {
+    if (this.usesExperimentalCodexAppServer()) {
+      await this.startCodexAppServerEventListener()
+      return
+    }
+
     if (this.listenerLoopRunning || this.disposed) {
       return
     }
@@ -1387,6 +1438,144 @@ export class ThreadSessionRuntime {
         await delay(backoffMs)
         backoffMs = Math.min(backoffMs * 2, maxBackoffMs)
       }
+    }
+  }
+
+  private async startCodexAppServerEventListener(): Promise<void> {
+    if (this.listenerLoopRunning || this.disposed) {
+      return
+    }
+    const client = this.codexAppServerClient
+    if (!client) {
+      return
+    }
+
+    this.listenerLoopRunning = true
+
+    try {
+      while (!this.listenerAborted) {
+        const event = await client.nextEvent({ timeoutMs: 30_000 })
+        if (!event) {
+          if (this.disposed || this.listenerAborted) {
+            return
+          }
+          continue
+        }
+
+        await this.dispatchAction(() => {
+          return this.handleCodexAppServerEvent(event)
+        })
+      }
+    } finally {
+      this.listenerLoopRunning = false
+    }
+  }
+
+  private async handleCodexAppServerEvent(
+    event: JsonRpcServerEvent,
+  ): Promise<void> {
+    const sessionId = this.state?.sessionId
+    if (!sessionId) {
+      return
+    }
+
+    if (isThreadStatusChangedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      if (event.params.status.type === 'idle') {
+        this.markQueueDispatchIdle(sessionId)
+        this.stopTyping()
+        await this.tryDrainQueue({ showIndicator: true })
+        return
+      }
+
+      this.markQueueDispatchBusy(sessionId)
+      const waitingOnUserInput =
+        'activeFlags' in event.params.status &&
+        event.params.status.activeFlags?.includes('waitingOnUserInput')
+      if (waitingOnUserInput) {
+        this.stopTyping()
+      } else {
+        this.ensureTypingNow()
+      }
+      return
+    }
+
+    if (isTurnPlanUpdatedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      await this.handleCodexAppServerPlanUpdated(event.params)
+      return
+    }
+
+    if (isRequestUserInputEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      await this.showInteractiveUi({
+        show: async () => {
+          const client = this.codexAppServerClient
+          if (!client) {
+            return
+          }
+          await showAppServerQuestionDropdowns({
+            thread: this.thread,
+            client,
+            requestId: String(event.id),
+            params: event.params,
+            silent: this.getQueueLength() > 0,
+          })
+        },
+      })
+      return
+    }
+
+    if (isThreadTokenUsageUpdatedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      this.codexAppServerLastTokenUsage = event.params.tokenUsage
+      return
+    }
+
+    if (isItemStartedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      if (isAppServerAgentMessageItem(event.params.item)) {
+        this.ensureTypingNow()
+      }
+      return
+    }
+
+    if (isAgentMessageDeltaEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      this.ensureTypingNow()
+      return
+    }
+
+    if (isItemCompletedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      if (isAppServerAgentMessageItem(event.params.item)) {
+        await this.handleCodexAppServerAgentMessageCompleted({
+          item: event.params.item,
+        })
+      }
+      return
+    }
+
+    if (isTurnCompletedEvent(event)) {
+      if (event.params.threadId !== sessionId) {
+        return
+      }
+      await this.handleCodexAppServerTurnCompleted(event.params)
+      return
     }
   }
 
@@ -2667,6 +2856,32 @@ export class ThreadSessionRuntime {
   // shown, answered, and new /queue items arrive close together.
   private questionQueueHandoffPromise: Promise<void> | null = null
 
+  private codexAppServerClient: CodexAppServerClient | null = null
+  private codexAppServerCurrentTurnId: string | null = null
+  private codexAppServerRunStartedAt: number | null = null
+  private codexAppServerLastTokenUsage:
+    | {
+        total: {
+          totalTokens: number
+          inputTokens: number
+          cachedInputTokens: number
+          outputTokens: number
+          reasoningOutputTokens: number
+        }
+        last: {
+          totalTokens: number
+          inputTokens: number
+          cachedInputTokens: number
+          outputTokens: number
+          reasoningOutputTokens: number
+        }
+        modelContextWindow?: number
+      }
+    | null = null
+  private codexAppServerLastPlanFingerprint: string | null = null
+  private codexAppServerModelId: string | null = null
+  private codexAppServerReasoningEffort: AppServerReasoningEffort | null = null
+
   private maybeHandoffQueuedItemForPendingQuestion({
     sessionId,
     reason,
@@ -3242,6 +3457,14 @@ export class ThreadSessionRuntime {
   async enqueueIncoming(input: IngressInput): Promise<EnqueueResult> {
     threadState.setSessionUsername(this.threadId, input.username)
 
+    if (this.usesExperimentalCodexAppServer()) {
+      if (input.preprocess) {
+        return this.enqueueWithPreprocess(input)
+      }
+      input = maybeConvertLeadingCommand(input)
+      return this.enqueueViaLocalQueue(input)
+    }
+
     // When a preprocessor is provided, we must resolve it inside
     // dispatchAction before we know the final mode for routing.
     if (input.preprocess) {
@@ -3346,6 +3569,23 @@ export class ThreadSessionRuntime {
     reason: string
     sessionId: string
   }): Promise<void> {
+    if (this.usesExperimentalCodexAppServer()) {
+      const turnId = this.codexAppServerCurrentTurnId
+      if (!turnId) {
+        logger.log(
+          `[APP SERVER ABORT] id=${abortId} reason=${reason} threadId=${sessionId} skipped=no-turn`,
+        )
+        return
+      }
+      await this.abortSessionViaCodexAppServer({
+        abortId,
+        reason,
+        threadId: sessionId,
+        turnId,
+      })
+      return
+    }
+
     const client = getOpencodeClient(this.projectDirectory)
     if (!client) {
       logger.log(
@@ -3571,12 +3811,497 @@ export class ThreadSessionRuntime {
     })
   }
 
+  private normalizeAppServerReasoningEffort(
+    variant: string | undefined,
+  ): AppServerReasoningEffort | null {
+    if (!variant) {
+      return null
+    }
+    const normalized = variant.toLowerCase()
+    switch (normalized) {
+      case 'minimal':
+      case 'low':
+      case 'medium':
+      case 'high':
+      case 'xhigh':
+        return normalized
+      default:
+        return null
+    }
+  }
+
+  private parseAppServerModelId(modelId: string | undefined): string | null {
+    if (!modelId) {
+      return null
+    }
+    const [providerId, ...modelParts] = modelId.split('/')
+    const parsedModelId = modelParts.join('/')
+    if (!providerId || !parsedModelId) {
+      return null
+    }
+    return parsedModelId
+  }
+
+  private async resolveAppServerModelConfig({
+    appId,
+    explicitModel,
+    sessionId,
+  }: {
+    appId?: string
+    explicitModel?: string
+    sessionId?: string
+  }): Promise<{
+    model: string
+    reasoningEffort: AppServerReasoningEffort | null
+  }> {
+    if (explicitModel) {
+      return {
+        model: this.parseAppServerModelId(explicitModel) || 'gpt-5.4',
+        reasoningEffort: null,
+      }
+    }
+
+    const [sessionModel, channelModel, globalModel] = await Promise.all([
+      sessionId ? getSessionModel(sessionId) : Promise.resolve(undefined),
+      this.channelId ? getChannelModel(this.channelId) : Promise.resolve(undefined),
+      appId ? getGlobalModel(appId) : Promise.resolve(undefined),
+    ])
+
+    const preferredModel =
+      sessionModel?.modelId
+      || channelModel?.modelId
+      || globalModel?.modelId
+      || 'openai/gpt-5.4'
+
+    const preferredVariant =
+      sessionModel?.variant
+      || channelModel?.variant
+      || globalModel?.variant
+      || 'xhigh'
+
+    return {
+      model: this.parseAppServerModelId(preferredModel) || 'gpt-5.4',
+      reasoningEffort: this.normalizeAppServerReasoningEffort(preferredVariant),
+    }
+  }
+
+  private async resolveChannelTopic(): Promise<string | undefined> {
+    if (this.thread.parent?.type === ChannelType.GuildText) {
+      return this.thread.parent.topic?.trim() || undefined
+    }
+    if (!this.channelId) {
+      return undefined
+    }
+    const fetched = await errore.tryAsync(() => {
+      return this.thread.guild.channels.fetch(this.channelId!)
+    })
+    if (fetched instanceof Error || !fetched) {
+      return undefined
+    }
+    if (fetched.type !== ChannelType.GuildText) {
+      return undefined
+    }
+    return fetched.topic?.trim() || undefined
+  }
+
+  private async buildAppServerPromptContext({
+    input,
+  }: {
+    input: QueuedMessage
+  }): Promise<{
+    developerInstructions: string
+    prompt: string
+  }> {
+    const worktreeInfo = await getThreadWorktree(this.thread.id)
+    const worktree: WorktreeInfo | undefined =
+      worktreeInfo?.status === 'ready' && worktreeInfo.worktree_directory
+        ? {
+            worktreeDirectory: worktreeInfo.worktree_directory,
+            branch: worktreeInfo.worktree_name,
+            mainRepoDirectory: worktreeInfo.project_directory,
+          }
+        : undefined
+    const worktreeChanged = this.consumeWorktreePromptChange(worktree)
+    const channelTopic = await this.resolveChannelTopic()
+    const syntheticContext = getOpencodePromptContext({
+      username: input.username,
+      userId: input.userId,
+      sourceMessageId: input.sourceMessageId,
+      sourceThreadId: input.sourceThreadId,
+      repliedMessage: input.repliedMessage,
+      worktree,
+      currentAgent: input.agent,
+      worktreeChanged,
+    })
+
+    const promptWithImagePaths = (() => {
+      const images = input.images || []
+      if (images.length === 0) {
+        return input.prompt
+      }
+      const imageList = images
+        .map((img) => {
+          return `- ${img.sourceUrl || img.filename}`
+        })
+        .join('\n')
+      return `${input.prompt}\n\nIncluded image references:\n${imageList}`
+    })()
+
+    const developerInstructions = getOpencodeSystemMessage({
+      sessionId: this.state?.sessionId || 'codex-app-server',
+      channelId: this.channelId,
+      guildId: this.thread.guildId,
+      threadId: this.thread.id,
+      channelTopic,
+      agents: [],
+      username: this.state?.sessionUsername || input.username,
+    })
+
+    return {
+      developerInstructions,
+      prompt: `${promptWithImagePaths}\n\n${syntheticContext}`,
+    }
+  }
+
+  private async getOrCreateCodexAppServerClient(): Promise<
+    CodexAppServerClient | Error
+  > {
+    if (this.codexAppServerClient) {
+      return this.codexAppServerClient
+    }
+
+    const client = new CodexAppServerClient({
+      codexHome: getExperimentalCodexHome(),
+    })
+    const initializeResult = await errore.tryAsync(() => {
+      return client.initialize()
+    })
+    if (initializeResult instanceof Error) {
+      client.dispose()
+      return initializeResult
+    }
+
+    logger.log(
+      `[APP SERVER] initialized codexHome=${initializeResult.codexHome} thread=${this.threadId}`,
+    )
+    this.codexAppServerClient = client
+    return client
+  }
+
+  private async ensureCodexAppServerThread({
+    input,
+  }: {
+    input: QueuedMessage
+  }): Promise<
+    | Error
+    | {
+        client: CodexAppServerClient
+        threadId: string
+        createdNewThread: boolean
+        developerInstructions: string
+        model: string
+        reasoningEffort: AppServerReasoningEffort | null
+      }
+  > {
+    const clientResult = await this.getOrCreateCodexAppServerClient()
+    if (clientResult instanceof Error) {
+      return clientResult
+    }
+    const client = clientResult
+
+    const sessionId = this.state?.sessionId || await getThreadSession(this.thread.id) || undefined
+    const { developerInstructions } = await this.buildAppServerPromptContext({
+      input,
+    })
+    const { model, reasoningEffort } = await this.resolveAppServerModelConfig({
+      appId: input.appId,
+      explicitModel: input.model,
+      sessionId,
+    })
+
+    if (sessionId) {
+      const resumeResult = await errore.tryAsync(() => {
+        return client.resumeThread({
+          threadId: sessionId,
+          persistExtendedHistory: false,
+        })
+      })
+      if (!(resumeResult instanceof Error)) {
+        threadState.setSessionId(this.threadId, resumeResult.thread.id)
+        this.codexAppServerModelId = model
+        this.codexAppServerReasoningEffort = reasoningEffort
+        return {
+          client,
+          threadId: resumeResult.thread.id,
+          createdNewThread: false,
+          developerInstructions,
+          model,
+          reasoningEffort,
+        }
+      }
+      logger.warn(
+        `[APP SERVER] failed to resume thread ${sessionId}, starting new thread: ${resumeResult.message}`,
+      )
+    }
+
+    const startResult = await errore.tryAsync(() => {
+      return client.startThread({
+        model,
+        cwd: this.sdkDirectory,
+        approvalPolicy: 'never',
+        sandbox: 'danger-full-access',
+        developerInstructions,
+        experimentalRawEvents: false,
+        persistExtendedHistory: false,
+      })
+    })
+    if (startResult instanceof Error) {
+      return startResult
+    }
+
+    await setThreadSession(this.thread.id, startResult.thread.id)
+    threadState.setSessionId(this.threadId, startResult.thread.id)
+    this.codexAppServerModelId = model
+    this.codexAppServerReasoningEffort = reasoningEffort
+    return {
+      client,
+      threadId: startResult.thread.id,
+      createdNewThread: true,
+      developerInstructions,
+      model,
+      reasoningEffort,
+    }
+  }
+
+  private async emitCodexAppServerFooter(): Promise<void> {
+    const runStartedAt = this.codexAppServerRunStartedAt
+    if (!runStartedAt) {
+      return
+    }
+    const elapsedMs = Date.now() - runStartedAt
+    const sessionDuration =
+      elapsedMs < 1000
+        ? '<1s'
+        : prettyMilliseconds(elapsedMs, { secondsDecimalDigits: 0 })
+
+    const folderName = path.basename(this.sdkDirectory)
+    const branchResult = await errore.tryAsync(() => {
+      return execAsync('git symbolic-ref --short HEAD', {
+        cwd: this.sdkDirectory,
+      })
+    })
+    const branchName =
+      branchResult instanceof Error ? '' : branchResult.stdout.trim()
+    const truncate = (value: string, max: number) => {
+      return value.length > max ? `${value.slice(0, max - 1)}…` : value
+    }
+    const truncatedFolder = truncate(folderName, 30)
+    const truncatedBranch = truncate(branchName, 30)
+    const contextInfo = (() => {
+      const tokenUsage = this.codexAppServerLastTokenUsage
+      const contextWindow = tokenUsage?.modelContextWindow
+      const totalTokens = tokenUsage?.total.totalTokens || 0
+      if (!contextWindow || totalTokens <= 0) {
+        return ''
+      }
+      return ` ⋅ ${Math.round((totalTokens / contextWindow) * 100)}%`
+    })()
+    const modelInfo = this.codexAppServerModelId
+      ? ` ⋅ ${this.codexAppServerModelId}`
+      : ''
+    const footerText = `*${truncatedBranch ? `${truncatedFolder} ⋅ ${truncatedBranch} ⋅ ` : `${truncatedFolder} ⋅ `}${sessionDuration}${contextInfo}${modelInfo}*`
+
+    this.stopTyping()
+    await sendThreadMessage(this.thread, footerText, {
+      flags: this.getNotifyFlags(),
+    })
+  }
+
+  private async handleCodexAppServerPlanUpdated(
+    params: TurnPlanUpdatedParams,
+  ): Promise<void> {
+    const normalizedPlan = normalizeAppServerPlanUpdate({ params })
+    const fingerprint = JSON.stringify(normalizedPlan)
+    if (fingerprint === this.codexAppServerLastPlanFingerprint) {
+      return
+    }
+    this.codexAppServerLastPlanFingerprint = fingerprint
+
+    const planLines = normalizedPlan.steps.map((step) => {
+      const marker =
+        step.status === 'completed'
+          ? 'x'
+          : step.status === 'inProgress'
+            ? '>'
+            : '-'
+      return `${marker} ${step.text}`
+    })
+    const content = [
+      normalizedPlan.explanation ? `Plan: ${normalizedPlan.explanation}` : 'Plan updated:',
+      ...planLines,
+    ].join('\n')
+    await sendThreadMessage(this.thread, content, {
+      flags: SILENT_MESSAGE_FLAGS,
+    })
+  }
+
+  private async handleCodexAppServerAgentMessageCompleted({
+    item,
+  }: {
+    item: {
+      id: string
+      text: string
+      phase: string
+    }
+  }): Promise<void> {
+    const text = item.text.trim()
+    if (!text) {
+      return
+    }
+    await sendThreadMessage(this.thread, text)
+    this.requestTypingRepulse()
+  }
+
+  private async handleCodexAppServerTurnCompleted(params: {
+    turn: {
+      id: string
+      status: string
+      error?: unknown
+    }
+  }): Promise<void> {
+    this.codexAppServerCurrentTurnId = null
+
+    if (params.turn.status !== 'completed' && params.turn.error) {
+      await sendThreadMessage(
+        this.thread,
+        `✗ app-server turn error: ${JSON.stringify(params.turn.error)}`,
+        { flags: NOTIFY_MESSAGE_FLAGS },
+      )
+      return
+    }
+
+    await this.emitCodexAppServerFooter()
+    this.resetPerRunState()
+  }
+
+  private async abortSessionViaCodexAppServer({
+    abortId,
+    reason,
+    threadId,
+    turnId,
+  }: {
+    abortId: string
+    reason: string
+    threadId: string
+    turnId: string
+  }): Promise<void> {
+    const client = this.codexAppServerClient
+    if (!client) {
+      logger.log(
+        `[APP SERVER ABORT] id=${abortId} reason=${reason} threadId=${threadId} skipped=no-client`,
+      )
+      return
+    }
+
+    const interruptResult = await errore.tryAsync(() => {
+      return client.interruptTurn({
+        threadId,
+        turnId,
+      })
+    })
+    if (interruptResult instanceof Error) {
+      logger.warn(
+        `[APP SERVER ABORT] id=${abortId} reason=${reason} threadId=${threadId} failed=${interruptResult.message}`,
+      )
+      return
+    }
+
+    logger.log(
+      `[APP SERVER ABORT] id=${abortId} reason=${reason} threadId=${threadId} turnId=${turnId} success`,
+    )
+  }
+
+  private async dispatchPromptViaCodexAppServer(
+    input: QueuedMessage,
+  ): Promise<void> {
+    this.lastDisplayedContextPercentage = 0
+    this.lastRateLimitDisplayTime = 0
+
+    const ensureResult = await this.ensureCodexAppServerThread({ input })
+    if (ensureResult instanceof Error) {
+      this.stopTyping()
+      await sendThreadMessage(
+        this.thread,
+        `✗ ${ensureResult.message}`,
+        { flags: NOTIFY_MESSAGE_FLAGS },
+      )
+      await this.tryDrainQueue({ showIndicator: true })
+      return
+    }
+
+    const {
+      client,
+      threadId,
+      developerInstructions,
+      model,
+      reasoningEffort,
+    } = ensureResult
+
+    if (!this.listenerLoopRunning) {
+      void this.startEventListener()
+    }
+
+    const { prompt } = await this.buildAppServerPromptContext({ input })
+    const collaborationMode = {
+      mode: 'plan' as const,
+      settings: {
+        model,
+        reasoning_effort: reasoningEffort,
+        developer_instructions: developerInstructions,
+      },
+    }
+
+    const turnResult = await errore.tryAsync(() => {
+      return client.startTurn({
+        threadId,
+        input: [
+          {
+            type: 'text',
+            text: prompt,
+            text_elements: [],
+          },
+        ],
+        collaborationMode,
+      })
+    })
+    if (turnResult instanceof Error) {
+      this.stopTyping()
+      await sendThreadMessage(
+        this.thread,
+        `✗ app-server turn failed: ${turnResult.message}`,
+        { flags: NOTIFY_MESSAGE_FLAGS },
+      )
+      await this.tryDrainQueue({ showIndicator: true })
+      return
+    }
+
+    this.codexAppServerCurrentTurnId = turnResult.turn.id
+    this.codexAppServerRunStartedAt = Date.now()
+    this.markQueueDispatchBusy(threadId)
+    this.ensureTypingNow()
+  }
+
   // ── Prompt Dispatch ─────────────────────────────────────────
   // Resolve session, build system message, send to OpenCode.
   // The listener is already running, so this only handles
   // session ensure + model/agent + SDK call + state.
 
   private async dispatchPrompt(input: QueuedMessage): Promise<void> {
+    if (this.usesExperimentalCodexAppServer() && !input.command) {
+      await this.dispatchPromptViaCodexAppServer(input)
+      return
+    }
+
     this.lastDisplayedContextPercentage = 0
     this.lastRateLimitDisplayTime = 0
 

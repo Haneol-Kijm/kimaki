@@ -52,6 +52,7 @@ import {
 } from './message-preprocessing.js'
 import { cancelPendingActionButtons } from './commands/action-buttons.js'
 import { cancelPendingQuestion, hasPendingQuestionForThread } from './commands/ask-question.js'
+import { isExperimentalCodexAppServerEnabled } from './codex-app-server/config.js'
 import { cancelPendingFileUpload } from './commands/file-upload.js'
 import { cancelPendingPermission } from './commands/permissions.js'
 import { cancelHtmlActionsForThread } from './html-actions.js'
@@ -695,6 +696,20 @@ export async function startDiscordBot({
           }
           const dismissedQuestion = hasPendingQuestionForThread(thread.id)
           if (dismissedQuestion) {
+            const trimmedContent = (message.content || '').trim()
+            if (
+              isExperimentalCodexAppServerEnabled()
+              && trimmedContent.length > 0
+            ) {
+              const questionReplyResult = await cancelPendingQuestion(
+                thread.id,
+                trimmedContent,
+              )
+              if (questionReplyResult === 'replied') {
+                return
+              }
+            }
+
             await cancelPendingQuestion(thread.id)
             await runtime.abortActiveRunAndWait({
               reason: 'user sent a new message while question was pending',

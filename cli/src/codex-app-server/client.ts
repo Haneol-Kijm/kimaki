@@ -10,6 +10,7 @@ import {
   type JsonRpcResponse,
   type JsonRpcServerEvent,
   type RequestUserInputResponse,
+  type ThreadResumeResponse,
   type ThreadStartResponse,
   type TurnStartResponse,
 } from './types.js'
@@ -43,6 +44,7 @@ function stringifyJsonRpcError(error: JsonRpcError): string {
 }
 
 type StartOptions = {
+  codexHome?: string
   configOverrides?: string[]
   enabledFeatures?: string[]
   disabledFeatures?: string[]
@@ -58,6 +60,11 @@ type StartThreadParams = {
   persistExtendedHistory?: boolean
 }
 
+type ResumeThreadParams = {
+  threadId: string
+  persistExtendedHistory?: boolean
+}
+
 type StartTurnParams = {
   threadId: string
   input: Array<{
@@ -66,6 +73,11 @@ type StartTurnParams = {
     text_elements: []
   }>
   collaborationMode?: CollaborationMode | null
+}
+
+type InterruptTurnParams = {
+  threadId: string
+  turnId: string
 }
 
 export class CodexAppServerClient {
@@ -80,6 +92,7 @@ export class CodexAppServerClient {
   private closeError: Error | null = null
 
   constructor({
+    codexHome,
     configOverrides = [],
     enabledFeatures = [],
     disabledFeatures = [],
@@ -96,7 +109,13 @@ export class CodexAppServerClient {
       args.push('--disable', feature)
     }
 
+    const env = {
+      ...process.env,
+      ...(codexHome ? { CODEX_HOME: codexHome } : {}),
+    }
+
     this.process = spawn('codex', args, {
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -179,6 +198,18 @@ export class CodexAppServerClient {
     })
   }
 
+  async resumeThread(
+    params: ResumeThreadParams,
+  ): Promise<ThreadResumeResponse> {
+    return this.sendRequest<ThreadResumeResponse>({
+      method: 'thread/resume',
+      params: {
+        threadId: params.threadId,
+        persistExtendedHistory: params.persistExtendedHistory ?? false,
+      },
+    })
+  }
+
   async startTurn(params: StartTurnParams): Promise<TurnStartResponse> {
     return this.sendRequest<TurnStartResponse>({
       method: 'turn/start',
@@ -186,6 +217,16 @@ export class CodexAppServerClient {
         threadId: params.threadId,
         input: params.input,
         collaborationMode: params.collaborationMode ?? null,
+      },
+    })
+  }
+
+  async interruptTurn(params: InterruptTurnParams): Promise<void> {
+    await this.sendRequest<void>({
+      method: 'turn/interrupt',
+      params: {
+        threadId: params.threadId,
+        turnId: params.turnId,
       },
     })
   }
