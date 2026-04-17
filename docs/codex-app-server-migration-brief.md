@@ -219,13 +219,36 @@ Most importantly for future Kimaki UX:
 - after the tool was rejected, the model fell back to a plain-text numbered
   question in the final answer
 
+Follow-up probe with explicit `turn/start.collaborationMode` set to:
+
+- `mode: "plan"`
+- `settings.model: "gpt-5.4"`
+- `settings.reasoning_effort: "xhigh"`
+
+produced a successful structured input flow:
+
+- `thread/status/changed` emitted `activeFlags: ["waitingOnUserInput"]`
+- `item/tool/requestUserInput` arrived with:
+  - server request `id`
+  - `threadId`
+  - `turnId`
+  - `itemId`
+  - structured `questions[]`
+- replying with a plain JSON-RPC response body:
+  - `{"id": <request id>, "result": {"answers": {"question_id": {"answers": [...]}}}}`
+  successfully resumed the turn
+- the turn then continued to a final assistant message and `turn/completed`
+
 This means:
 
 - plan updates are real at runtime, not just declared in schema
 - structured user input is also real, but gated by collaboration mode
+- `plan` mode is sufficient to unlock the structured question flow in a real
+  app-server session
 - a future Kimaki question UI likely needs:
   - collaboration-mode awareness
   - graceful fallback when structured elicitation is unavailable
+  - a request/response bridge for server request ids
 
 Why that matters:
 
@@ -250,6 +273,10 @@ becomes stable enough.
 - `requestUserInput` appears to be blocked in Default mode, so Kimaki will need
   to understand or set collaboration mode explicitly instead of assuming the
   tool is always available
+- Kimaki will need to decide whether:
+  - every turn runs in `plan` mode
+  - only selected turns opt into `plan` mode
+  - or Discord UI toggles collaboration mode per thread / per request
 - websocket auth modes (`capability-token`, `signed-bearer-token`) exist, but
   are not yet exercised in Kimaki
 - there is no evidence yet that every desired capability is stable in the same

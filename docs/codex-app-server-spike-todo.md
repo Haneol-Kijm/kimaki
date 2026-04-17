@@ -93,12 +93,32 @@ Already observed through `codex debug app-server send-message-v2 ...`:
 - `turn/plan/updated` is emitted in practice
 - `request_user_input` exists in practice but is rejected in Default mode
 
+Already observed through a direct stdio JSON-RPC probe against
+`codex app-server --listen stdio://`:
+
+- `turn/start.collaborationMode = { mode: \"plan\", settings: ... }` unlocks
+  real `item/tool/requestUserInput`
+- the request includes a server request `id` plus:
+  - `threadId`
+  - `turnId`
+  - `itemId`
+  - structured `questions[]`
+- replying to that same JSON-RPC request id with:
+  - `result.answers.<question_id>.answers = [ ... ]`
+  resumes the turn successfully
+- after the response:
+  - `waitingOnUserInput` clears
+  - token usage updates continue
+  - final assistant output arrives
+  - `turn/completed` fires
+
 ## Immediate Follow-Up Questions
 
-- Which collaboration mode is required for `request_user_input` to succeed?
+- Which turns should Kimaki run in `plan` mode vs `default` mode?
 - Can Kimaki set that mode per turn without breaking normal chat behavior?
 - Can `turn/plan/updated` alone already power a partial plan UI before full
   structured input support?
+- What is the right server-request-id mapping layer for Discord interactions?
 
 ## Exit Criteria
 
